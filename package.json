@@ -1,0 +1,10 @@
+{
+  "name": "hotel-info-explorer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hotel search + nearby restaurant/store map using Google Maps/Places APIs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
