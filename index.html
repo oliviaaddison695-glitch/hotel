@@ -43,41 +43,32 @@
         </div>
       </div>
 
-      <div class="tabs main-tabs">
-        <button class="tab active" data-main-tab="info">Hotel info</button>
-        <button class="tab" data-main-tab="maps">Maps</button>
+      <div class="tabs">
+        <button class="tab active" data-vibe-tab="vibe">Hotel vibe</button>
+        <button class="tab" data-vibe-tab="area">Area vibe</button>
       </div>
+      <div class="tab-panel" id="vibePanel"></div>
+      <div class="tab-panel hidden" id="areaPanel"></div>
 
-      <section id="infoTabContent">
-        <div class="tabs">
-          <button class="tab active" data-vibe-tab="vibe">Hotel vibe</button>
-          <button class="tab" data-vibe-tab="area">Area vibe</button>
+      <div class="maps-grid">
+        <div>
+          <h3>Location map (hotel + nearby places)</h3>
+          <div id="locationMap" class="map"></div>
         </div>
-        <div class="tab-panel" id="vibePanel"></div>
-        <div class="tab-panel hidden" id="areaPanel"></div>
-      </section>
-
-      <section id="mapsTabContent" class="hidden">
-        <div class="maps-grid">
-          <div>
-            <h3>City map (hotel pin)</h3>
-            <div id="cityMap" class="map"></div>
-          </div>
-          <div>
-            <h3>Satellite nearby map (stores + restaurants)</h3>
-            <div id="satelliteMap" class="map"></div>
-            <div id="nearbyList" class="nearby-list"></div>
-          </div>
-          <div>
-            <h3>Hotel street map (pins)</h3>
-            <div id="streetPinsMap" class="map"></div>
-          </div>
-          <div>
-            <h3>Closest police station distance</h3>
-            <div id="policeMap" class="map"></div>
-          </div>
+        <div>
+          <h3>City map (hotel pin)</h3>
+          <div id="cityMap" class="map"></div>
         </div>
-      </section>
+        <div>
+          <h3>Satellite nearby map (stores + restaurants)</h3>
+          <div id="satelliteMap" class="map"></div>
+          <div id="nearbyList" class="nearby-list"></div>
+        </div>
+        <div>
+          <h3>Closest police station distance</h3>
+          <div id="policeMap" class="map"></div>
+        </div>
+      </div>
 
       <div class="workflow-actions">
         <button id="triggerWorkflowBtn" type="button">Trigger photo scraping workflow</button>
