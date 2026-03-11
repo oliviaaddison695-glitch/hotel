@@ -2,6 +2,12 @@ const N8N_WEBHOOK_URL = "https://oliviaaddison695.app.n8n.cloud/form-test/6d2bd2
 const DRIVE_FOLDER_URL = "https://drive.google.com/";
 const FALLBACK_BROWSER_MAPS_KEY = "AIzaSyCPYoWbh0n0jPYkIQmN5NuEn0CFMtoeYMs";
 
+function readBrowserKeyOverride() {
+  const fromWindow = window.HOTEL_MAPS_BROWSER_API_KEY;
+  const fromStorage = window.localStorage?.getItem("HOTEL_MAPS_BROWSER_API_KEY");
+  return fromWindow || fromStorage || null;
+}
+
 const hotelForm = document.getElementById("hotelForm");
 const hotelNameInput = document.getElementById("hotelName");
 const statusEl = document.getElementById("status");
@@ -59,14 +65,14 @@ async function apiFetch(url, options = {}) {
 async function loadClientConfig() {
   const runningOnGithubPages = window.location.hostname.endsWith("github.io");
   if (runningOnGithubPages) {
-    return { mapsApiKey: FALLBACK_BROWSER_MAPS_KEY, source: "fallback" };
+    return { mapsApiKey: readBrowserKeyOverride() || FALLBACK_BROWSER_MAPS_KEY, source: "fallback" };
   }
 
   try {
     const config = await apiFetch("/api/config");
     return { ...config, source: "server" };
   } catch {
-    return { mapsApiKey: FALLBACK_BROWSER_MAPS_KEY, source: "fallback" };
+    return { mapsApiKey: readBrowserKeyOverride() || FALLBACK_BROWSER_MAPS_KEY, source: "fallback" };
   }
 }
 
@@ -78,13 +84,17 @@ async function loadGoogleMaps() {
     googleMapsKey = config.mapsApiKey;
   }
 
+  window.gm_authFailure = () => {
+    statusEl.textContent = "Google Maps key was rejected. Check API key referrer restrictions, enabled APIs, and billing.";
+  };
+
   await new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsKey}&libraries=marker,places,geometry`;
     script.async = true;
     script.defer = true;
     script.onload = resolve;
-    script.onerror = () => reject(new Error("Failed to load Google Maps JavaScript API."));
+    script.onerror = () => reject(new Error("Failed to load Google Maps JavaScript API. Verify browser API key + Maps JavaScript API + billing."));
     document.head.appendChild(script);
   });
 }
