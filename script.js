@@ -17,6 +17,7 @@ function readBrowserKeyOverride() {
 
 const hotelForm = document.getElementById("hotelForm");
 const hotelNameInput = document.getElementById("hotelName");
+const searchBtn = hotelForm?.querySelector("button[type=\"submit\"]");
 const statusEl = document.getElementById("status");
 const resultCard = document.getElementById("resultCard");
 
@@ -44,6 +45,7 @@ let policeInfoWindow;
 let nearbyMarkers = [];
 let policeMarkers = [];
 let googleMapsKey;
+let searchInProgress = false;
 
 function categoryClass(categoryLabel) {
   if (categoryLabel === "Restaurant") return "marker-restaurant";
@@ -487,11 +489,23 @@ async function fallbackHotelNearbySearch(query) {
 
 hotelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
+  if (searchInProgress) {
+    statusEl.textContent = "Search already running. Please wait...";
+    return;
+  }
+
   const query = hotelNameInput.value.trim();
 
   if (!query) {
     statusEl.textContent = "Please enter a hotel name or address.";
     return;
+  }
+
+  searchInProgress = true;
+  if (searchBtn) {
+    searchBtn.disabled = true;
+    searchBtn.textContent = "Searching...";
   }
 
   statusEl.textContent = "Resolving hotel and loading map data...";
@@ -530,6 +544,12 @@ hotelForm.addEventListener("submit", async (event) => {
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     statusEl.textContent = error.message;
+  } finally {
+    searchInProgress = false;
+    if (searchBtn) {
+      searchBtn.disabled = false;
+      searchBtn.textContent = "Find hotel";
+    }
   }
 });
 
