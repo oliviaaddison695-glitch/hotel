@@ -4,8 +4,15 @@ const FALLBACK_BROWSER_MAPS_KEY = "AIzaSyCPYoWbh0n0jPYkIQmN5NuEn0CFMtoeYMs";
 
 function readBrowserKeyOverride() {
   const fromWindow = window.HOTEL_MAPS_BROWSER_API_KEY;
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("mapsKey");
+
+  if (fromQuery && window.localStorage) {
+    window.localStorage.setItem("HOTEL_MAPS_BROWSER_API_KEY", fromQuery);
+  }
+
   const fromStorage = window.localStorage?.getItem("HOTEL_MAPS_BROWSER_API_KEY");
-  return fromWindow || fromStorage || null;
+  return fromWindow || fromQuery || fromStorage || null;
 }
 
 const hotelForm = document.getElementById("hotelForm");
@@ -79,24 +86,62 @@ async function loadClientConfig() {
 async function loadGoogleMaps() {
   if (window.google?.maps?.marker) return;
 
-  if (!googleMapsKey) {
-    const config = await loadClientConfig();
-    googleMapsKey = config.mapsApiKey;
+  const config = await loadClientConfig();
+  const keyCandidates = [readBrowserKeyOverride(), config.mapsApiKey, FALLBACK_BROWSER_MAPS_KEY]
+    .filter(Boolean)
+    .filter((value, index, array) => array.indexOf(value) === index);
+
+  let lastError = new Error("No Google Maps key available.");
+
+  for (const candidateKey of keyCandidates) {
+    try {
+      await new Promise((resolve, reject) => {
+        const existingScript = document.getElementById("gmaps-script");
+        if (existingScript) existingScript.remove();
+
+        let settled = false;
+        const fail = (message) => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(message));
+        };
+
+        window.gm_authFailure = () => {
+          fail("Google Maps key was rejected. Check API key referrer restrictions, enabled APIs, and billing.");
+        };
+
+        const script = document.createElement("script");
+        script.id = "gmaps-script";
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${candidateKey}&libraries=marker,places,geometry`;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => {
+          setTimeout(() => {
+            if (window.google?.maps?.places) {
+              if (!settled) {
+                settled = true;
+                resolve();
+              }
+            } else {
+              fail("Google Maps JavaScript API loaded incompletely. Verify key + API enablement + billing.");
+            }
+          }, 150);
+        };
+        script.onerror = () => fail("Failed to load Google Maps JavaScript API. Verify browser API key + Maps JavaScript API + billing.");
+        document.head.appendChild(script);
+      });
+
+      googleMapsKey = candidateKey;
+      return;
+    } catch (error) {
+      lastError = error;
+      if (window.google?.maps) {
+        delete window.google;
+      }
+    }
   }
 
-  window.gm_authFailure = () => {
-    statusEl.textContent = "Google Maps key was rejected. Check API key referrer restrictions, enabled APIs, and billing.";
-  };
-
-  await new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsKey}&libraries=marker,places,geometry`;
-    script.async = true;
-    script.defer = true;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error("Failed to load Google Maps JavaScript API. Verify browser API key + Maps JavaScript API + billing."));
-    document.head.appendChild(script);
-  });
+  throw lastError;
 }
 
 function buildSearchLinks(hotelName, address) {
