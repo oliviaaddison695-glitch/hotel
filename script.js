@@ -57,6 +57,11 @@ async function apiFetch(url, options = {}) {
 }
 
 async function loadClientConfig() {
+  const runningOnGithubPages = window.location.hostname.endsWith("github.io");
+  if (runningOnGithubPages) {
+    return { mapsApiKey: FALLBACK_BROWSER_MAPS_KEY, source: "fallback" };
+  }
+
   try {
     const config = await apiFetch("/api/config");
     return { ...config, source: "server" };
@@ -71,9 +76,6 @@ async function loadGoogleMaps() {
   if (!googleMapsKey) {
     const config = await loadClientConfig();
     googleMapsKey = config.mapsApiKey;
-    if (config.source === "fallback") {
-      statusEl.textContent = "Server API unavailable. Running browser fallback mode.";
-    }
   }
 
   await new Promise((resolve, reject) => {
@@ -432,6 +434,11 @@ hotelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const query = hotelNameInput.value.trim();
 
+  if (!query) {
+    statusEl.textContent = "Please enter a hotel name or address.";
+    return;
+  }
+
   statusEl.textContent = "Resolving hotel and loading map data...";
 
   try {
@@ -446,7 +453,7 @@ hotelForm.addEventListener("submit", async (event) => {
       });
     } catch (error) {
       if (error.message.includes("cannot reach server") || error.message.includes("Fetch failed")) {
-        statusEl.textContent = "Server API unavailable. Falling back to browser-only search...";
+        statusEl.textContent = "Using direct Google Maps mode...";
         data = await fallbackHotelNearbySearch(query);
       } else {
         throw error;
