@@ -133,27 +133,91 @@ function getNearby(location) {
   });
 }
 
-function getNearestPolice(location) {
+function getLocalizedPoliceKeywords() {
+  const lang = (navigator.language || "en").toLowerCase();
+  const base = ["police", "police station"];
+
+  const dict = {
+    es: ["policía", "comisaría"],
+    fr: ["police", "commissariat"],
+    de: ["polizei", "polizeiwache"],
+    it: ["polizia", "stazione di polizia"],
+    pt: ["polícia", "delegacia"],
+    nl: ["politie", "politiebureau"],
+    ar: ["شرطة", "مركز شرطة"],
+    he: ["משטרה", "תחנת משטרה"],
+    tr: ["polis", "karakol"],
+    ru: ["полиция", "полицейский участок"],
+    ja: ["警察", "警察署"],
+    ko: ["경찰", "경찰서"],
+    zh: ["警察", "派出所"]
+  };
+
+  const langCode = lang.split("-")[0];
+  return [...new Set([...base, ...(dict[langCode] || [])])];
+}
+
+function nearbyPoliceSearch(location) {
   return new Promise((resolve) => {
     const service = new google.maps.places.PlacesService(document.createElement("div"));
     service.nearbySearch(
-      { location, radius: 5000, type: "police" },
-      (results, status) => {
-        if (status !== google.maps.places.PlacesServiceStatus.OK || !results?.length) {
-          resolve(null);
-          return;
-        }
-        resolve(results[0]);
-      }
+      {
+        location,
+        rankBy: google.maps.places.RankBy.DISTANCE,
+        type: "police",
+        keyword: "police"
+      },
+      (results) => resolve(results || [])
     );
   });
+}
+
+function textPoliceSearch(query, location) {
+  return new Promise((resolve) => {
+    const service = new google.maps.places.PlacesService(document.createElement("div"));
+    service.textSearch(
+      { query, location, radius: 7000 },
+      (results) => resolve(results || [])
+    );
+  });
+}
+
+async function getNearestPolice(location, hotel) {
+  const localizedKeywords = getLocalizedPoliceKeywords();
+  const queries = localizedKeywords.flatMap((kw) => [
+    `${hotel.name} nearby ${kw}`,
+    `${hotel.name} ${kw}`,
+    `${hotel.formatted_address || ""} ${kw}`.trim()
+  ]);
+
+  const [nearbyResults, ...textResults] = await Promise.all([
+    nearbyPoliceSearch(location),
+    ...queries.map((q) => textPoliceSearch(q, location))
+  ]);
+
+  const all = [...nearbyResults, ...textResults.flat()]
+    .filter((place) => place?.geometry?.location);
+
+  const unique = Array.from(
+    new Map(all.map((p) => [p.place_id || `${p.name}-${p.vicinity}`, p])).values()
+  );
+
+  if (!unique.length) return null;
+
+  unique.sort((a, b) => {
+    const d1 = google.maps.geometry.spherical.computeDistanceBetween(location, a.geometry.location);
+    const d2 = google.maps.geometry.spherical.computeDistanceBetween(location, b.geometry.location);
+    return d1 - d2;
+  });
+
+  return unique[0];
 }
 
 async function searchHotel(query) {
   const bestMatch = await getPlacePredictions(`${query} hotel`);
   const hotel = await getPlaceDetails(bestMatch.place_id);
   const nearby = await getNearby(hotel.geometry.location);
-  const nearestPolice = await getNearestPolice(hotel.geometry.location);
+  const nearestPolice = await getNearestPolice(hotel.geometry.location, hotel);
   return { hotel, nearby, nearestPolice };
 }
 
