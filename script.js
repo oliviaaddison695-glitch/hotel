@@ -452,7 +452,13 @@ hotelForm.addEventListener("submit", async (event) => {
         body: JSON.stringify({ query })
       });
     } catch (error) {
-      if (error.message.includes("cannot reach server") || error.message.includes("Fetch failed")) {
+      const shouldFallback =
+        error.message.includes("cannot reach server") ||
+        error.message.includes("Fetch failed") ||
+        error.message.includes("Request failed (404)") ||
+        error.message.includes("Request failed (405)");
+
+      if (shouldFallback) {
         statusEl.textContent = "Using direct Google Maps mode...";
         data = await fallbackHotelNearbySearch(query);
       } else {
