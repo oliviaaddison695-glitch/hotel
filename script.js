@@ -1,5 +1,6 @@
 const N8N_WEBHOOK_URL = "https://oliviaaddison695.app.n8n.cloud/form-test/6d2bd2be-be7e-4ea2-8b35-98c02625ed01";
 const DRIVE_FOLDER_URL = "https://drive.google.com/";
+const FALLBACK_BROWSER_MAPS_KEY = "AIzaSyCPYoWbh0n0jPYkIQmN5NuEn0CFMtoeYMs";
 
 const hotelForm = document.getElementById("hotelForm");
 const hotelNameInput = document.getElementById("hotelName");
@@ -34,6 +35,7 @@ let googleMapsKey;
 function categoryClass(categoryLabel) {
   if (categoryLabel === "Restaurant") return "marker-restaurant";
   if (categoryLabel === "Clothing store") return "marker-clothing";
+  if (categoryLabel === "Police") return "marker-police";
   return "marker-store";
 }
 
@@ -55,8 +57,12 @@ async function apiFetch(url, options = {}) {
 }
 
 async function loadClientConfig() {
-  const config = await apiFetch("/api/config");
-  return config;
+  try {
+    const config = await apiFetch("/api/config");
+    return { ...config, source: "server" };
+  } catch {
+    return { mapsApiKey: FALLBACK_BROWSER_MAPS_KEY, source: "fallback" };
+  }
 }
 
 async function loadGoogleMaps() {
@@ -65,11 +71,14 @@ async function loadGoogleMaps() {
   if (!googleMapsKey) {
     const config = await loadClientConfig();
     googleMapsKey = config.mapsApiKey;
+    if (config.source === "fallback") {
+      statusEl.textContent = "Server API unavailable. Running browser fallback mode.";
+    }
   }
 
   await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsKey}&libraries=marker`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsKey}&libraries=marker,places,geometry`;
     script.async = true;
     script.defer = true;
     script.onload = resolve;
@@ -143,19 +152,10 @@ function renderNearbySection(hotel, places) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend(hotel.location);
 
-  createLabelMarker(
-    nearbyMap,
-    nearbyMarkers,
-    hotel.location,
-    "Hotel",
-    "marker-hotel",
-    hotel.name,
-    () => {
-      nearbyInfoWindow.setContent(`<strong>${hotel.name}</strong><br>${hotel.address || "Address unavailable"}`);
-      nearbyInfoWindow.open({ map: nearbyMap, position: hotel.location });
-    },
-    2000
-  );
+  createLabelMarker(nearbyMap, nearbyMarkers, hotel.location, "Hotel", "marker-hotel", hotel.name, () => {
+    nearbyInfoWindow.setContent(`<strong>${hotel.name}</strong><br>${hotel.address || "Address unavailable"}`);
+    nearbyInfoWindow.open({ map: nearbyMap, position: hotel.location });
+  }, 2000);
 
   const markerById = new Map();
 
@@ -227,38 +227,21 @@ function renderPoliceSection(hotel, stations) {
   const bounds = new google.maps.LatLngBounds();
   bounds.extend(hotel.location);
 
-  createLabelMarker(
-    policeMap,
-    policeMarkers,
-    hotel.location,
-    "Hotel",
-    "marker-hotel",
-    hotel.name,
-    () => {
-      policeInfoWindow.setContent(`<strong>${hotel.name}</strong><br>${hotel.address || "Address unavailable"}`);
-      policeInfoWindow.open({ map: policeMap, position: hotel.location });
-    },
-    2000
-  );
+  createLabelMarker(policeMap, policeMarkers, hotel.location, "Hotel", "marker-hotel", hotel.name, () => {
+    policeInfoWindow.setContent(`<strong>${hotel.name}</strong><br>${hotel.address || "Address unavailable"}`);
+    policeInfoWindow.open({ map: policeMap, position: hotel.location });
+  }, 2000);
 
   const markerById = new Map();
 
   stations.forEach((station) => {
     bounds.extend(station.location);
 
-    const marker = createLabelMarker(
-      policeMap,
-      policeMarkers,
-      station.location,
-      "Police",
-      "marker-police",
-      station.name,
-      () => {
-        highlightList("#policeList li", station.placeId);
-        policeInfoWindow.setContent(`<strong>${station.name}</strong><br>${station.address || "Address unavailable"}`);
-        policeInfoWindow.open({ map: policeMap, anchor: marker });
-      }
-    );
+    const marker = createLabelMarker(policeMap, policeMarkers, station.location, "Police", "marker-police", station.name, () => {
+      highlightList("#policeList li", station.placeId);
+      policeInfoWindow.setContent(`<strong>${station.name}</strong><br>${station.address || "Address unavailable"}`);
+      policeInfoWindow.open({ map: policeMap, anchor: marker });
+    });
 
     markerById.set(station.placeId, marker);
   });
@@ -291,6 +274,160 @@ function renderPoliceSection(hotel, stations) {
   });
 }
 
+function placesService() {
+  return new google.maps.places.PlacesService(document.createElement("div"));
+}
+
+function categoryLabelFromTypes(types = []) {
+  if (types.some((t) => t.includes("restaurant") || t.includes("meal") || t.includes("food") || t.includes("cafe"))) return "Restaurant";
+  if (types.includes("clothing_store")) return "Clothing store";
+  if (types.includes("store") || types.includes("shopping_mall") || types.includes("department_store") || types.includes("supermarket")) return "Store";
+  return null;
+}
+
+function findHotelCandidate(query) {
+  return new Promise((resolve, reject) => {
+    placesService().findPlaceFromQuery(
+      { query, fields: ["place_id", "name", "formatted_address", "geometry"] },
+      (results, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !results?.length) {
+          reject(new Error("Hotel not found. Try a more specific name or full address."));
+          return;
+        }
+        resolve(results[0]);
+      }
+    );
+  });
+}
+
+function placeDetails(placeId) {
+  return new Promise((resolve, reject) => {
+    placesService().getDetails(
+      { placeId, fields: ["name", "formatted_address", "formatted_phone_number", "rating", "website", "geometry"] },
+      (result, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !result) {
+          reject(new Error("Could not load hotel details."));
+          return;
+        }
+        resolve(result);
+      }
+    );
+  });
+}
+
+function nearbyByType(location, type) {
+  return new Promise((resolve) => {
+    placesService().nearbySearch(
+      { location, rankBy: google.maps.places.RankBy.DISTANCE, type },
+      (results) => resolve(results || [])
+    );
+  });
+}
+
+function distanceMatrixDriving(origin, destinations) {
+  return new Promise((resolve) => {
+    if (!destinations.length) {
+      resolve([]);
+      return;
+    }
+
+    new google.maps.DistanceMatrixService().getDistanceMatrix(
+      {
+        origins: [origin],
+        destinations,
+        travelMode: google.maps.TravelMode.DRIVING,
+        unitSystem: google.maps.UnitSystem.METRIC
+      },
+      (resp, status) => {
+        if (status !== "OK") {
+          resolve([]);
+          return;
+        }
+        resolve(resp.rows?.[0]?.elements || []);
+      }
+    );
+  });
+}
+
+function dedupePlacesById(places) {
+  return Array.from(new Map(places.map((p) => [p.place_id, p])).values());
+}
+
+async function fallbackHotelNearbySearch(query) {
+  const candidate = await findHotelCandidate(query);
+  const hotelDetails = await placeDetails(candidate.place_id);
+  const hotelLoc = hotelDetails.geometry.location;
+
+  const [restaurantsRaw, storesRaw, policeRaw] = await Promise.all([
+    nearbyByType(hotelLoc, "restaurant"),
+    nearbyByType(hotelLoc, "store"),
+    nearbyByType(hotelLoc, "police")
+  ]);
+
+  const nearbyPlaces = dedupePlacesById([...restaurantsRaw, ...storesRaw])
+    .map((p) => {
+      if (!p.geometry?.location) return null;
+      const categoryLabel = categoryLabelFromTypes(p.types || []);
+      if (!categoryLabel) return null;
+      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.geometry.location);
+      return {
+        placeId: p.place_id,
+        name: p.name,
+        categoryLabel,
+        address: p.vicinity || p.formatted_address || "",
+        distanceMeters,
+        location: { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() }
+      };
+    })
+    .filter(Boolean)
+    .filter((p) => p.distanceMeters <= 350)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 120);
+
+  const policeBase = dedupePlacesById(policeRaw)
+    .map((p) => {
+      if (!p.geometry?.location) return null;
+      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.geometry.location);
+      return {
+        placeId: p.place_id,
+        name: p.name,
+        address: p.vicinity || p.formatted_address || "",
+        distanceMeters,
+        location: { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() },
+        _gLocation: p.geometry.location
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 3);
+
+  const matrix = await distanceMatrixDriving(hotelLoc, policeBase.map((p) => p._gLocation));
+
+  const policeStations = policeBase.map((p, i) => ({
+    placeId: p.placeId,
+    name: p.name,
+    address: p.address,
+    distanceMeters: p.distanceMeters,
+    location: p.location,
+    drivingDistanceText: matrix[i]?.distance?.text || null,
+    drivingDurationText: matrix[i]?.duration?.text || null
+  }));
+
+  return {
+    hotel: {
+      placeId: candidate.place_id,
+      name: hotelDetails.name,
+      address: hotelDetails.formatted_address,
+      phone: hotelDetails.formatted_phone_number || "",
+      rating: hotelDetails.rating || null,
+      website: hotelDetails.website || "",
+      location: { lat: hotelLoc.lat(), lng: hotelLoc.lng() }
+    },
+    nearbyPlaces,
+    policeStations
+  };
+}
+
 hotelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const query = hotelNameInput.value.trim();
@@ -299,18 +436,29 @@ hotelForm.addEventListener("submit", async (event) => {
 
   try {
     await loadGoogleMaps();
-    const data = await apiFetch("/api/hotel-nearby", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query })
-    });
+
+    let data;
+    try {
+      data = await apiFetch("/api/hotel-nearby", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query })
+      });
+    } catch (error) {
+      if (error.message.includes("cannot reach server") || error.message.includes("Fetch failed")) {
+        statusEl.textContent = "Server API unavailable. Falling back to browser-only search...";
+        data = await fallbackHotelNearbySearch(query);
+      } else {
+        throw error;
+      }
+    }
 
     renderHotelInfo(data.hotel);
     renderNearbySection(data.hotel, data.nearbyPlaces || []);
     renderPoliceSection(data.hotel, data.policeStations || []);
 
     resultCard.hidden = false;
-    statusEl.textContent = "Loaded hotel, nearby stores/restaurants (street-level), and closest police stations.";
+    statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     statusEl.textContent = error.message;
