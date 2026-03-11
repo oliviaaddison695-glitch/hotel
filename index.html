@@ -14,12 +14,12 @@
     <section class="hero" id="heroSection">
       <div class="hero-card">
         <h1>Hotel Info Explorer</h1>
-        <p>Type a hotel name to load details, vibe, links, and maps.</p>
+        <p>Search a hotel and get two map modes: local stores/restaurants + closest police stations.</p>
 
         <form id="hotelForm">
-          <label for="hotelName">Hotel name</label>
+          <label for="hotelName">Hotel name or address</label>
           <div class="search-row">
-            <input id="hotelName" type="text" placeholder="e.g. The Plaza New York" required />
+            <input id="hotelName" type="text" placeholder="e.g. Sallés Hotel Pere IV Barcelona" required />
             <button type="submit">Find hotel</button>
           </div>
         </form>
@@ -34,7 +34,6 @@
           <p id="address">-</p>
           <p><strong>Phone:</strong> <span id="phone">-</span></p>
           <p><strong>Star rating:</strong> <span id="rating">-</span></p>
-          <p><strong>Closest police station:</strong> <span id="policeDistance">-</span></p>
         </div>
         <div class="actions">
           <a id="websiteLink" target="_blank" rel="noopener">Hotel website</a>
@@ -43,31 +42,23 @@
         </div>
       </div>
 
-      <div class="tabs">
-        <button class="tab active" data-vibe-tab="vibe">Hotel vibe</button>
-        <button class="tab" data-vibe-tab="area">Area vibe</button>
+      <h3>1) Stores & Restaurants (street-level auto area)</h3>
+      <p class="legend">Pins use generic labels: Restaurant / Clothing store / Store.</p>
+      <div class="nearby-layout">
+        <div id="nearbyMap" class="map"></div>
+        <aside class="sidebar">
+          <h4 id="resultsHeading">Places</h4>
+          <ul id="placesList"></ul>
+        </aside>
       </div>
-      <div class="tab-panel" id="vibePanel"></div>
-      <div class="tab-panel hidden" id="areaPanel"></div>
 
-      <div class="maps-grid">
-        <div>
-          <h3>Location map (hotel + nearby places)</h3>
-          <div id="locationMap" class="map"></div>
-        </div>
-        <div>
-          <h3>City map (hotel pin)</h3>
-          <div id="cityMap" class="map"></div>
-        </div>
-        <div>
-          <h3>Satellite nearby map (stores + restaurants)</h3>
-          <div id="satelliteMap" class="map"></div>
-          <div id="nearbyList" class="nearby-list"></div>
-        </div>
-        <div>
-          <h3>Closest police station distance</h3>
-          <div id="policeMap" class="map"></div>
-        </div>
+      <h3>2) Closest Police Stations (auto nearest)</h3>
+      <div class="nearby-layout">
+        <div id="policeMap" class="map"></div>
+        <aside class="sidebar">
+          <h4 id="policeHeading">Police stations</h4>
+          <ul id="policeList"></ul>
+        </aside>
       </div>
 
       <div class="workflow-actions">
