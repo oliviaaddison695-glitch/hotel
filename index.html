@@ -1,0 +1,84 @@
+diff --git a/index.html b/index.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..6deaaf2e0b42b08a1bba393370c809543baa8349
+--- /dev/null
++++ b/index.html
+@@ -0,0 +1,78 @@
++<!DOCTYPE html>
++<html lang="en">
++<head>
++  <meta charset="UTF-8" />
++  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++  <title>Hotel Info Explorer</title>
++  <link rel="preconnect" href="https://fonts.googleapis.com">
++  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
++  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
++  <link rel="stylesheet" href="styles.css" />
++</head>
++<body>
++  <main class="container">
++    <header>
++      <h1>Hotel Info Explorer</h1>
++      <p>Search a hotel and get core details, maps, links, and vibe insights.</p>
++    </header>
++
++    <section class="card search-card">
++      <form id="hotelForm">
++        <label for="hotelName">Hotel name</label>
++        <div class="search-row">
++          <input id="hotelName" type="text" placeholder="e.g. The Plaza New York" required />
++          <button type="submit">Find hotel</button>
++        </div>
++      </form>
++      <p id="status" aria-live="polite"></p>
++    </section>
++
++    <section class="card" id="resultCard" hidden>
++      <div class="hotel-top">
++        <div>
++          <h2 id="name">-</h2>
++          <p id="address">-</p>
++          <p><strong>Phone:</strong> <span id="phone">-</span></p>
++          <p><strong>Star rating:</strong> <span id="rating">-</span></p>
++        </div>
++        <div class="actions">
++          <a id="websiteLink" target="_blank" rel="noopener">Hotel website</a>
++          <a id="tripLink" target="_blank" rel="noopener">Tripadvisor</a>
++          <a id="bookingLink" target="_blank" rel="noopener">Booking.com</a>
++        </div>
++      </div>
++
++      <div class="tabs">
++        <button class="tab active" data-tab="vibe">Hotel vibe</button>
++        <button class="tab" data-tab="area">Area vibe</button>
++      </div>
++      <div class="tab-panel" id="vibePanel"></div>
++      <div class="tab-panel hidden" id="areaPanel"></div>
++
++      <div class="maps-grid">
++        <div>
++          <h3>City map (hotel pin)</h3>
++          <div id="cityMap" class="map"></div>
++        </div>
++        <div>
++          <h3>Satellite nearby map (stores + restaurants)</h3>
++          <div id="satelliteMap" class="map"></div>
++          <div id="nearbyList" class="nearby-list"></div>
++        </div>
++        <div>
++          <h3>Hotel street view</h3>
++          <div id="streetMap" class="map"></div>
++        </div>
++      </div>
++
++      <div class="workflow-actions">
++        <button id="triggerWorkflowBtn" type="button">Trigger photo scraping workflow</button>
++        <a id="driveFolderBtn" href="https://drive.google.com/" target="_blank" rel="noopener">Open Drive folder</a>
++      </div>
++      <p id="workflowStatus" aria-live="polite"></p>
++    </section>
++  </main>
++
++  <script src="script.js"></script>
++</body>
++</html>
