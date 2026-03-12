@@ -540,18 +540,9 @@ hotelForm.addEventListener("submit", async (event) => {
         body: JSON.stringify({ query })
       });
     } catch (error) {
-      const shouldFallback =
-        error.message.includes("cannot reach server") ||
-        error.message.includes("Fetch failed") ||
-        error.message.includes("Request failed (404)") ||
-        error.message.includes("Request failed (405)");
-
-      if (shouldFallback) {
-        statusEl.textContent = "Using direct Google Maps mode...";
-        data = await fallbackHotelNearbySearch(query);
-      } else {
-        throw error;
-      }
+      console.warn("Server API failed, falling back to direct browser mode:", error.message);
+      statusEl.textContent = "Using direct Google Maps mode...";
+      data = await fallbackHotelNearbySearch(query);
     }
 
     renderHotelInfo(data.hotel);
