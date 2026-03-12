@@ -109,7 +109,6 @@ async function loadGoogleMaps() {
         };
 
         window.gm_authFailure = () => {
-          window.gm_authFailed = true;
           fail("Google Maps key was rejected. Check API key referrer restrictions, enabled APIs, and billing.");
         };
 
@@ -347,13 +346,8 @@ function categoryLabelFromTypes(types = []) {
 
 function checkAuthAndTimeout(executor, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
-    if (window.gm_authFailed) {
-      reject(new Error("Google Maps authentication failed. Please check your API key."));
-      return;
-    }
-
     const timer = setTimeout(() => {
-      reject(new Error("Google Maps API request timed out."));
+      reject(new Error("Google Maps API request timed out. Check console for RefererNotAllowedMapError."));
     }, timeoutMs);
 
     executor(
