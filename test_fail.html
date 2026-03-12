@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Auth Fail</title>
+</head>
+<body>
+  <script>
+    let authFailed = false;
+    window.gm_authFailure = () => {
+      console.log("gm_authFailure called!");
+      authFailed = true;
+    };
+    const script = document.createElement("script");
+    script.src = "https://maps.googleapis.com/maps/api/js?key=AIzaSyCPYoWbh0n0jPYkIQmN5NuEn0CFMtoeYMs&libraries=marker,places,geometry";
+    script.onload = () => {
+        console.log("Onload called");
+        setTimeout(() => {
+           console.log("Is map defined?", !!window.google?.maps?.places);
+        }, 150);
+    }
+    script.onerror = () => {
+        console.log("On error called!");
+    }
+    document.head.appendChild(script);
+
+  </script>
+</body>
+</html>

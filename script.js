@@ -109,6 +109,7 @@ async function loadGoogleMaps() {
         };
 
         window.gm_authFailure = () => {
+          window.gm_authFailed = true;
           fail("Google Maps key was rejected. Check API key referrer restrictions, enabled APIs, and billing.");
         };
 
@@ -344,8 +345,26 @@ function categoryLabelFromTypes(types = []) {
   return null;
 }
 
-function findHotelCandidate(query) {
+function checkAuthAndTimeout(executor, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
+    if (window.gm_authFailed) {
+      reject(new Error("Google Maps authentication failed. Please check your API key."));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      reject(new Error("Google Maps API request timed out."));
+    }, timeoutMs);
+
+    executor(
+      (res) => { clearTimeout(timer); resolve(res); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+function findHotelCandidate(query) {
+  return checkAuthAndTimeout((resolve, reject) => {
     placesService().findPlaceFromQuery(
       { query, fields: ["place_id", "name", "formatted_address", "geometry"] },
       (results, status) => {
@@ -360,7 +379,7 @@ function findHotelCandidate(query) {
 }
 
 function placeDetails(placeId) {
-  return new Promise((resolve, reject) => {
+  return checkAuthAndTimeout((resolve, reject) => {
     placesService().getDetails(
       { placeId, fields: ["name", "formatted_address", "formatted_phone_number", "rating", "website", "geometry"] },
       (result, status) => {
@@ -375,7 +394,7 @@ function placeDetails(placeId) {
 }
 
 function nearbyByType(location, type) {
-  return new Promise((resolve) => {
+  return checkAuthAndTimeout((resolve, reject) => {
     placesService().nearbySearch(
       { location, rankBy: google.maps.places.RankBy.DISTANCE, type },
       (results) => resolve(results || [])
@@ -384,7 +403,7 @@ function nearbyByType(location, type) {
 }
 
 function distanceMatrixDriving(origin, destinations) {
-  return new Promise((resolve) => {
+  return checkAuthAndTimeout((resolve, reject) => {
     if (!destinations.length) {
       resolve([]);
       return;
