@@ -7,7 +7,7 @@ const PORT = Number(process.env.PORT || 4173);
 const GOOGLE_MAPS_SERVER_API_KEY = process.env.GOOGLE_MAPS_SERVER_API_KEY;
 const GOOGLE_MAPS_BROWSER_API_KEY = process.env.GOOGLE_MAPS_BROWSER_API_KEY;
 
-const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 350);
+const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 1500);
 const STORE_MAP_MAX_RESULTS = Number(process.env.STORE_MAP_MAX_RESULTS || 120);
 const POLICE_MAX_RESULTS = Number(process.env.POLICE_MAX_RESULTS || 3);
 
@@ -161,6 +161,61 @@ async function handleHotelNearby(req, res) {
 
     const hotelLocation = { lat: hotel.geometry.location.lat, lng: hotel.geometry.location.lng };
 
+    const [restaurantRaw, storeRaw, policeRaw] = await Promise.all([
+      nearbySearchByType(hotelLocation, "restaurant"),
+      nearbySearchByType(hotelLocation, "store"),
+      nearbySearchByType(hotelLocation, "police")
+    ]);
+
+    const streetPlaces = dedupeByPlaceId([...restaurantRaw, ...storeRaw])
+      .map((p) => {
+        if (!p.geometry?.location) return null;
+        const categoryLabel = mapCategoryLabel(p.types || []);
+        if (!categoryLabel) return null;
+        const location = { lat: p.geometry.location.lat, lng: p.geometry.location.lng };
+        const distanceMeters = haversineMeters(hotelLocation, location);
+        return {
+          placeId: p.place_id,
+          name: p.name,
+          categoryLabel,
+          address: p.vicinity || p.formatted_address || "",
+          distanceMeters,
+          location
+        };
+      })
+      .filter(Boolean)
+      .filter((p) => p.distanceMeters <= STORE_MAP_MAX_DISTANCE_METERS)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, STORE_MAP_MAX_RESULTS);
+
+    const nearestPolice = dedupeByPlaceId(policeRaw)
+      .map((p) => {
+        if (!p.geometry?.location) return null;
+        const location = { lat: p.geometry.location.lat, lng: p.geometry.location.lng };
+        const distanceMeters = haversineMeters(hotelLocation, location);
+        return {
+          placeId: p.place_id,
+          name: p.name,
+          address: p.vicinity || p.formatted_address || "",
+          distanceMeters,
+          location
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, POLICE_MAX_RESULTS);
+
+    const matrix = await distanceMatrixDriving(
+      hotelLocation,
+      nearestPolice.map((p) => p.location)
+    );
+
+    const policeWithDriving = nearestPolice.map((p, i) => ({
+      ...p,
+      drivingDistanceText: matrix[i]?.distance?.text || null,
+      drivingDurationText: matrix[i]?.duration?.text || null
+    }));
+
     sendJson(res, 200, {
       hotel: {
         placeId: hotelCandidate.place_id,
@@ -170,7 +225,20 @@ async function handleHotelNearby(req, res) {
         rating: hotel.rating || null,
         website: hotel.website || "",
         location: hotelLocation
-      }
+      },
+      mapModes: {
+        storesRestaurants: {
+          strategy: "tight street-level auto area",
+          maxDistanceMeters: STORE_MAP_MAX_DISTANCE_METERS,
+          maxResults: STORE_MAP_MAX_RESULTS
+        },
+        police: {
+          strategy: "closest police stations to hotel",
+          maxResults: POLICE_MAX_RESULTS
+        }
+      },
+      nearbyPlaces: streetPlaces,
+      policeStations: policeWithDriving
     });
   } catch (error) {
     sendJson(res, 500, { error: formatGoogleError(error), raw: error.message || String(error) });

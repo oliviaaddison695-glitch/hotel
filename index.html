@@ -14,7 +14,7 @@
     <section class="hero" id="heroSection">
       <div class="hero-card">
         <h1>Hotel Info Explorer</h1>
-        <p>Search a hotel and get basic information.</p>
+        <p>Search a hotel and get two map modes: local stores/restaurants + closest police stations.</p>
 
         <form id="hotelForm">
           <label for="hotelName">Hotel name or address</label>
@@ -40,6 +40,25 @@
           <a id="tripLink" target="_blank" rel="noopener">Tripadvisor</a>
           <a id="bookingLink" target="_blank" rel="noopener">Booking.com</a>
         </div>
+      </div>
+
+      <h3>1) Stores & Restaurants (street-level auto area)</h3>
+      <p class="legend">Pins use generic labels: Restaurant / Clothing store / Store.</p>
+      <div class="nearby-layout">
+        <div id="nearbyMap" class="map"></div>
+        <aside class="sidebar">
+          <h4 id="resultsHeading">Places</h4>
+          <ul id="placesList"></ul>
+        </aside>
+      </div>
+
+      <h3>2) Closest Police Stations (auto nearest)</h3>
+      <div class="nearby-layout">
+        <div id="policeMap" class="map"></div>
+        <aside class="sidebar">
+          <h4 id="policeHeading">Police stations</h4>
+          <ul id="policeList"></ul>
+        </aside>
       </div>
 
       <div class="workflow-actions">
