@@ -114,12 +114,12 @@ async function loadGoogleMaps() {
 
         const script = document.createElement("script");
         script.id = "gmaps-script";
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${candidateKey}&libraries=marker,places,geometry&v=weekly`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${candidateKey}&libraries=marker,places,geometry`;
         script.async = true;
         script.defer = true;
         script.onload = () => {
           setTimeout(() => {
-            if (window.google?.maps?.importLibrary) {
+            if (window.google?.maps?.places) {
               if (!settled) {
                 settled = true;
                 resolve();
@@ -344,51 +344,60 @@ function categoryLabelFromTypes(types = []) {
   return null;
 }
 
-async function findHotelCandidate(query) {
-  const { Place } = await google.maps.importLibrary("places");
-  const request = {
-    textQuery: query,
-    fields: ["id", "displayName", "formattedAddress", "location"],
-    maxResultCount: 1
-  };
+function checkAuthAndTimeout(executor, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Google Maps API request timed out. Please check your network connection or API keys."));
+    }, timeoutMs);
 
-  const { places } = await Place.searchByText(request);
-  if (!places || places.length === 0) {
-    throw new Error("Hotel not found. Try a more specific name or full address.");
-  }
-  return places[0];
-}
-
-async function placeDetails(placeId) {
-  const { Place } = await google.maps.importLibrary("places");
-  const place = new Place({ id: placeId });
-  await place.fetchFields({
-    fields: ["displayName", "formattedAddress", "nationalPhoneNumber", "rating", "websiteURI", "location"]
+    executor(
+      (res) => { clearTimeout(timer); resolve(res); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
   });
-  return place;
 }
 
-async function nearbyByType(location, type) {
-  const { Place } = await google.maps.importLibrary("places");
-  const request = {
-    fields: ["id", "displayName", "formattedAddress", "types", "location"],
-    locationRestriction: {
-      center: location,
-      radius: 1500,
-    },
-    includedTypes: [type],
-    maxResultCount: 20
-  };
-  try {
-    const { places } = await Place.searchNearby(request);
-    return places || [];
-  } catch (e) {
-    return [];
-  }
+function findHotelCandidate(query) {
+  return checkAuthAndTimeout((resolve, reject) => {
+    placesService().findPlaceFromQuery(
+      { query, fields: ["place_id", "name", "formatted_address", "geometry"] },
+      (results, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !results?.length) {
+          reject(new Error("Hotel not found. Try a more specific name or full address."));
+          return;
+        }
+        resolve(results[0]);
+      }
+    );
+  });
+}
+
+function placeDetails(placeId) {
+  return checkAuthAndTimeout((resolve, reject) => {
+    placesService().getDetails(
+      { placeId, fields: ["name", "formatted_address", "formatted_phone_number", "rating", "website", "geometry"] },
+      (result, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !result) {
+          reject(new Error("Could not load hotel details."));
+          return;
+        }
+        resolve(result);
+      }
+    );
+  });
+}
+
+function nearbyByType(location, type) {
+  return checkAuthAndTimeout((resolve, reject) => {
+    placesService().nearbySearch(
+      { location, rankBy: google.maps.places.RankBy.DISTANCE, type },
+      (results) => resolve(results || [])
+    );
+  });
 }
 
 function distanceMatrixDriving(origin, destinations) {
-  return new Promise((resolve) => {
+  return checkAuthAndTimeout((resolve, reject) => {
     if (!destinations.length) {
       resolve([]);
       return;
@@ -413,13 +422,13 @@ function distanceMatrixDriving(origin, destinations) {
 }
 
 function dedupePlacesById(places) {
-  return Array.from(new Map(places.map((p) => [p.id, p])).values());
+  return Array.from(new Map(places.map((p) => [p.place_id, p])).values());
 }
 
 async function fallbackHotelNearbySearch(query) {
   const candidate = await findHotelCandidate(query);
-  const hotelDetails = await placeDetails(candidate.id);
-  const hotelLoc = hotelDetails.location;
+  const hotelDetails = await placeDetails(candidate.place_id);
+  const hotelLoc = hotelDetails.geometry.location;
 
   const [restaurantsRaw, storesRaw, policeRaw] = await Promise.all([
     nearbyByType(hotelLoc, "restaurant"),
@@ -429,17 +438,17 @@ async function fallbackHotelNearbySearch(query) {
 
   const nearbyPlaces = dedupePlacesById([...restaurantsRaw, ...storesRaw])
     .map((p) => {
-      if (!p.location) return null;
+      if (!p.geometry?.location) return null;
       const categoryLabel = categoryLabelFromTypes(p.types || []);
       if (!categoryLabel) return null;
-      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.location);
+      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.geometry.location);
       return {
-        placeId: p.id,
-        name: p.displayName,
+        placeId: p.place_id,
+        name: p.name,
         categoryLabel,
-        address: p.formattedAddress || "",
+        address: p.vicinity || p.formatted_address || "",
         distanceMeters,
-        location: { lat: p.location.lat(), lng: p.location.lng() }
+        location: { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() }
       };
     })
     .filter(Boolean)
@@ -449,15 +458,15 @@ async function fallbackHotelNearbySearch(query) {
 
   const policeBase = dedupePlacesById(policeRaw)
     .map((p) => {
-      if (!p.location) return null;
-      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.location);
+      if (!p.geometry?.location) return null;
+      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.geometry.location);
       return {
-        placeId: p.id,
-        name: p.displayName,
-        address: p.formattedAddress || "",
+        placeId: p.place_id,
+        name: p.name,
+        address: p.vicinity || p.formatted_address || "",
         distanceMeters,
-        location: { lat: p.location.lat(), lng: p.location.lng() },
-        _gLocation: p.location
+        location: { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() },
+        _gLocation: p.geometry.location
       };
     })
     .filter(Boolean)
@@ -478,12 +487,12 @@ async function fallbackHotelNearbySearch(query) {
 
   return {
     hotel: {
-      placeId: candidate.id,
-      name: hotelDetails.displayName,
-      address: hotelDetails.formattedAddress,
-      phone: hotelDetails.nationalPhoneNumber || "",
+      placeId: candidate.place_id,
+      name: hotelDetails.name,
+      address: hotelDetails.formatted_address,
+      phone: hotelDetails.formatted_phone_number || "",
       rating: hotelDetails.rating || null,
-      website: hotelDetails.websiteURI || "",
+      website: hotelDetails.website || "",
       location: { lat: hotelLoc.lat(), lng: hotelLoc.lng() }
     },
     nearbyPlaces,
