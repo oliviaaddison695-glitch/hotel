@@ -8,6 +8,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
+<style>
+.map-container { position: relative; width: 100%; height: 300px; margin-bottom: 20px; }
+#cityMap { width: 100%; height: 100%; border-radius: 8px; }
+</style>
 </head>
 <body>
   <main class="container">
@@ -40,6 +44,12 @@
           <a id="tripLink" target="_blank" rel="noopener">Tripadvisor</a>
           <a id="bookingLink" target="_blank" rel="noopener">Booking.com</a>
         </div>
+      </div>
+
+      <h3>0) City Map</h3>
+      <p class="legend">Hotel location overview.</p>
+      <div class="map-container">
+        <div id="cityMap" class="map"></div>
       </div>
 
       <h3>1) Stores & Restaurants (street-level auto area)</h3>

@@ -38,10 +38,12 @@ const triggerWorkflowBtn = document.getElementById("triggerWorkflowBtn");
 const driveFolderBtn = document.getElementById("driveFolderBtn");
 const workflowStatus = document.getElementById("workflowStatus");
 
+let cityMap;
 let nearbyMap;
 let policeMap;
 let nearbyInfoWindow;
 let policeInfoWindow;
+let cityMarkers = [];
 let nearbyMarkers = [];
 let policeMarkers = [];
 let googleMapsKey;
@@ -195,6 +197,25 @@ function renderHotelInfo(hotel) {
   buildSearchLinks(hotel.name || "hotel", hotel.address || "");
 }
 
+function renderCityMapSection(hotel) {
+  cityMap = cityMap || new google.maps.Map(document.getElementById("cityMap"), {
+    center: hotel.location,
+    zoom: 12, // Zoomed out for city view
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: true,
+    mapId: "DEMO_MAP_ID"
+  });
+
+  cityMap.setCenter(hotel.location);
+  clearMarkerGroup(cityMarkers);
+
+  createLabelMarker(cityMap, cityMarkers, hotel.location, "Hotel", "marker-hotel", hotel.name, () => {
+    // Optionally add an info window here too if desired,
+    // but the pin itself might be enough for the city view
+  }, 2000);
+}
+
 function renderNearbySection(hotel, places) {
   nearbyMap = nearbyMap || new google.maps.Map(document.getElementById("nearbyMap"), {
     center: hotel.location,
@@ -241,9 +262,8 @@ function renderNearbySection(hotel, places) {
   });
 
   if (places.length) {
-    nearbyMap.fitBounds(bounds, 45);
-    const z = nearbyMap.getZoom();
-    if (z > 18) nearbyMap.setZoom(18);
+    nearbyMap.setCenter(hotel.location);
+    nearbyMap.setZoom(18); // Zoom in closer as requested by user
   }
 
   resultsHeading.textContent = `Places (${places.length})`;
@@ -340,9 +360,9 @@ function placesService() {
 }
 
 function categoryLabelFromTypes(types = []) {
-  if (types.some((t) => t.includes("restaurant") || t.includes("meal") || t.includes("food") || t.includes("cafe"))) return "Restaurant";
+  if (types.some((t) => t.includes("restaurant") || t.includes("meal") || t.includes("food") || t.includes("cafe") || t.includes("bar") || t.includes("bakery"))) return "Restaurant";
   if (types.includes("clothing_store")) return "Clothing store";
-  if (types.includes("store") || types.includes("shopping_mall") || types.includes("department_store") || types.includes("supermarket")) return "Store";
+  if (types.some((t) => t.includes("store") || t.includes("shopping_mall") || t.includes("department_store") || t.includes("supermarket") || t.includes("pharmacy") || t.includes("convenience_store"))) return "Store";
   return null;
 }
 
@@ -392,7 +412,7 @@ function placeDetails(placeId) {
 function nearbyByType(location, type) {
   return checkAuthAndTimeout((resolve, reject) => {
     placesService().nearbySearch(
-      { location, rankBy: google.maps.places.RankBy.DISTANCE, type },
+      { location, radius: 1000, type }, // Radius search can often yield denser local results than distance rank
       (results) => resolve(results || [])
     );
   });
@@ -432,13 +452,19 @@ async function fallbackHotelNearbySearch(query) {
   const hotelDetails = await placeDetails(candidate.place_id);
   const hotelLoc = hotelDetails.geometry.location;
 
-  const [restaurantsRaw, storesRaw, policeRaw] = await Promise.all([
+  const [restaurantsRaw, storesRaw, cafesRaw, barsRaw, clothingRaw, supermarketsRaw, policeRaw] = await Promise.all([
     nearbyByType(hotelLoc, "restaurant"),
     nearbyByType(hotelLoc, "store"),
+    nearbyByType(hotelLoc, "cafe"),
+    nearbyByType(hotelLoc, "bar"),
+    nearbyByType(hotelLoc, "clothing_store"),
+    nearbyByType(hotelLoc, "supermarket"),
     nearbyByType(hotelLoc, "police")
   ]);
 
-  const nearbyPlaces = dedupePlacesById([...restaurantsRaw, ...storesRaw])
+  const nearbyPlaces = dedupePlacesById([
+    ...restaurantsRaw, ...storesRaw, ...cafesRaw, ...barsRaw, ...clothingRaw, ...supermarketsRaw
+  ])
     .map((p) => {
       if (!p.geometry?.location) return null;
       const categoryLabel = categoryLabelFromTypes(p.types || []);
@@ -456,7 +482,7 @@ async function fallbackHotelNearbySearch(query) {
     .filter(Boolean)
     .filter((p) => p.distanceMeters <= 1500)
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 120);
+    .slice(0, 400); // Allow much more pins to maximize visible density
 
   const policeBase = dedupePlacesById(policeRaw)
     .map((p) => {
@@ -551,6 +577,7 @@ hotelForm.addEventListener("submit", async (event) => {
     }
 
     renderHotelInfo(data.hotel);
+    renderCityMapSection(data.hotel);
     renderNearbySection(data.hotel, data.nearbyPlaces || []);
     renderPoliceSection(data.hotel, data.policeStations || []);
 
