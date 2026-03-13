@@ -114,7 +114,7 @@ async function loadGoogleMaps() {
 
         const script = document.createElement("script");
         script.id = "gmaps-script";
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${candidateKey}&libraries=marker,places,geometry`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${candidateKey}&libraries=marker,places,geometry&loading=async&v=weekly`;
         script.async = true;
         script.defer = true;
         script.onload = () => {
@@ -174,7 +174,7 @@ function createLabelMarker(map, group, position, text, cssClass, title, onClick,
     collisionBehavior: google.maps.CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY
   });
 
-  marker.addListener("click", onClick);
+  marker.addListener("gmp-click", onClick);
   group.push(marker);
   return marker;
 }
@@ -201,7 +201,8 @@ function renderNearbySection(hotel, places) {
     zoom: 17,
     mapTypeControl: false,
     streetViewControl: false,
-    fullscreenControl: true
+    fullscreenControl: true,
+    mapId: "DEMO_MAP_ID"
   });
 
   nearbyInfoWindow = nearbyInfoWindow || new google.maps.InfoWindow();
@@ -277,7 +278,8 @@ function renderPoliceSection(hotel, stations) {
     zoom: 14,
     mapTypeControl: false,
     streetViewControl: false,
-    fullscreenControl: true
+    fullscreenControl: true,
+    mapId: "DEMO_MAP_ID"
   });
 
   policeInfoWindow = policeInfoWindow || new google.maps.InfoWindow();
