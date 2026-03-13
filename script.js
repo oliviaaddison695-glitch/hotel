@@ -174,7 +174,7 @@ function createLabelMarker(map, group, position, text, cssClass, title, onClick,
     collisionBehavior: google.maps.CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY
   });
 
-  marker.addListener("gmp-click", onClick);
+  marker.addEventListener("gmp-click", onClick);
   group.push(marker);
   return marker;
 }
