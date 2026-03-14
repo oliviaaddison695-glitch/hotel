@@ -6,6 +6,7 @@ const { URL } = require("url");
 const PORT = Number(process.env.PORT || 4173);
 const GOOGLE_MAPS_SERVER_API_KEY = process.env.GOOGLE_MAPS_SERVER_API_KEY;
 const GOOGLE_MAPS_BROWSER_API_KEY = process.env.GOOGLE_MAPS_BROWSER_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 350);
 const STORE_MAP_MAX_RESULTS = Number(process.env.STORE_MAP_MAX_RESULTS || 120);
@@ -136,6 +137,37 @@ function formatGoogleError(error) {
   return msg;
 }
 
+async function fetchGeminiInfo(hotelName, address) {
+  if (!GEMINI_API_KEY) return "AI information not available (Missing API Key).";
+
+  try {
+    const prompt = `Provide a brief overview of the city where ${hotelName} (${address}) is located, and a short, generic description of what a guest might expect at this hotel. Format as plain text or simple markdown.`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+      return "Could not fetch AI information at this time.";
+    }
+
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+  } catch (err) {
+    console.error("Gemini fetch error:", err);
+    return "Failed to connect to AI service.";
+  }
+}
+
 async function handleHotelNearby(req, res) {
   try {
     if (!GOOGLE_MAPS_SERVER_API_KEY) {
@@ -216,6 +248,8 @@ async function handleHotelNearby(req, res) {
       drivingDurationText: matrix[i]?.duration?.text || null
     }));
 
+    const aiInfo = await fetchGeminiInfo(hotel.name, hotel.formatted_address);
+
     sendJson(res, 200, {
       hotel: {
         placeId: hotelCandidate.place_id,
@@ -238,7 +272,8 @@ async function handleHotelNearby(req, res) {
         }
       },
       nearbyPlaces: streetPlaces,
-      policeStations: policeWithDriving
+      policeStations: policeWithDriving,
+      aiInfo: aiInfo
     });
   } catch (error) {
     sendJson(res, 500, { error: formatGoogleError(error), raw: error.message || String(error) });

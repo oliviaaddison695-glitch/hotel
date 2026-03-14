@@ -38,6 +38,9 @@ const triggerWorkflowBtn = document.getElementById("triggerWorkflowBtn");
 const driveFolderBtn = document.getElementById("driveFolderBtn");
 const workflowStatus = document.getElementById("workflowStatus");
 
+const tabButtons = document.querySelectorAll(".tab-button");
+const tabContents = document.querySelectorAll(".tab-content");
+
 let cityMap;
 let nearbyMap;
 let policeMap;
@@ -152,6 +155,13 @@ function buildSearchLinks(hotelName, address) {
   const query = encodeURIComponent(`${hotelName} ${address}`);
   tripLink.href = `https://www.tripadvisor.com/Search?q=${query}`;
   bookingLink.href = `https://www.booking.com/searchresults.html?ss=${query}`;
+}
+
+function renderAIInfo(aiInfo) {
+  const aiContainer = document.getElementById("aiInfoContent");
+  if (aiContainer) {
+    aiContainer.textContent = aiInfo || "No AI information available.";
+  }
 }
 
 function clearMarkerGroup(group) {
@@ -366,60 +376,51 @@ function categoryLabelFromTypes(types = []) {
   return null;
 }
 
-function checkAuthAndTimeout(executor, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error("Google Maps API request timed out. Please check your network connection or API keys."));
-    }, timeoutMs);
+async function findHotelCandidate(query) {
+  const { Place } = await google.maps.importLibrary("places");
+  const request = {
+    textQuery: query,
+    fields: ["id", "displayName", "formattedAddress", "location"],
+    maxResultCount: 1
+  };
 
-    executor(
-      (res) => { clearTimeout(timer); resolve(res); },
-      (err) => { clearTimeout(timer); reject(err); }
-    );
-  });
+  const { places } = await Place.searchByText(request);
+  if (!places || places.length === 0) {
+    throw new Error("Hotel not found. Try a more specific name or full address.");
+  }
+  return places[0];
 }
 
-function findHotelCandidate(query) {
-  return checkAuthAndTimeout((resolve, reject) => {
-    placesService().findPlaceFromQuery(
-      { query, fields: ["place_id", "name", "formatted_address", "geometry"] },
-      (results, status) => {
-        if (status !== google.maps.places.PlacesServiceStatus.OK || !results?.length) {
-          reject(new Error("Hotel not found. Try a more specific name or full address."));
-          return;
-        }
-        resolve(results[0]);
-      }
-    );
+async function placeDetails(placeId) {
+  const { Place } = await google.maps.importLibrary("places");
+  const place = new Place({ id: placeId });
+  await place.fetchFields({
+    fields: ["displayName", "formattedAddress", "nationalPhoneNumber", "rating", "websiteURI", "location"]
   });
+  return place;
 }
 
-function placeDetails(placeId) {
-  return checkAuthAndTimeout((resolve, reject) => {
-    placesService().getDetails(
-      { placeId, fields: ["name", "formatted_address", "formatted_phone_number", "rating", "website", "geometry"] },
-      (result, status) => {
-        if (status !== google.maps.places.PlacesServiceStatus.OK || !result) {
-          reject(new Error("Could not load hotel details."));
-          return;
-        }
-        resolve(result);
-      }
-    );
-  });
-}
-
-function nearbyByType(location, type) {
-  return checkAuthAndTimeout((resolve, reject) => {
-    placesService().nearbySearch(
-      { location, radius: 1000, type }, // Radius search can often yield denser local results than distance rank
-      (results) => resolve(results || [])
-    );
-  });
+async function nearbyByType(location, type) {
+  const { Place } = await google.maps.importLibrary("places");
+  const request = {
+    fields: ["id", "displayName", "formattedAddress", "types", "location"],
+    locationRestriction: {
+      center: location,
+      radius: 1500,
+    },
+    includedTypes: [type],
+    maxResultCount: 20
+  };
+  try {
+    const { places } = await Place.searchNearby(request);
+    return places || [];
+  } catch (e) {
+    return [];
+  }
 }
 
 function distanceMatrixDriving(origin, destinations) {
-  return checkAuthAndTimeout((resolve, reject) => {
+  return new Promise((resolve) => {
     if (!destinations.length) {
       resolve([]);
       return;
@@ -444,13 +445,13 @@ function distanceMatrixDriving(origin, destinations) {
 }
 
 function dedupePlacesById(places) {
-  return Array.from(new Map(places.map((p) => [p.place_id, p])).values());
+  return Array.from(new Map(places.map((p) => [p.id, p])).values());
 }
 
 async function fallbackHotelNearbySearch(query) {
   const candidate = await findHotelCandidate(query);
-  const hotelDetails = await placeDetails(candidate.place_id);
-  const hotelLoc = hotelDetails.geometry.location;
+  const hotelDetails = await placeDetails(candidate.id);
+  const hotelLoc = hotelDetails.location;
 
   const [restaurantsRaw, storesRaw, cafesRaw, barsRaw, clothingRaw, supermarketsRaw, policeRaw] = await Promise.all([
     nearbyByType(hotelLoc, "restaurant"),
@@ -466,17 +467,17 @@ async function fallbackHotelNearbySearch(query) {
     ...restaurantsRaw, ...storesRaw, ...cafesRaw, ...barsRaw, ...clothingRaw, ...supermarketsRaw
   ])
     .map((p) => {
-      if (!p.geometry?.location) return null;
+      if (!p.location) return null;
       const categoryLabel = categoryLabelFromTypes(p.types || []);
       if (!categoryLabel) return null;
-      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.geometry.location);
+      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.location);
       return {
-        placeId: p.place_id,
-        name: p.name,
+        placeId: p.id,
+        name: p.displayName,
         categoryLabel,
-        address: p.vicinity || p.formatted_address || "",
+        address: p.formattedAddress || "",
         distanceMeters,
-        location: { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() }
+        location: { lat: p.location.lat(), lng: p.location.lng() }
       };
     })
     .filter(Boolean)
@@ -486,15 +487,15 @@ async function fallbackHotelNearbySearch(query) {
 
   const policeBase = dedupePlacesById(policeRaw)
     .map((p) => {
-      if (!p.geometry?.location) return null;
-      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.geometry.location);
+      if (!p.location) return null;
+      const distanceMeters = google.maps.geometry.spherical.computeDistanceBetween(hotelLoc, p.location);
       return {
-        placeId: p.place_id,
-        name: p.name,
-        address: p.vicinity || p.formatted_address || "",
+        placeId: p.id,
+        name: p.displayName,
+        address: p.formattedAddress || "",
         distanceMeters,
-        location: { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() },
-        _gLocation: p.geometry.location
+        location: { lat: p.location.lat(), lng: p.location.lng() },
+        _gLocation: p.location
       };
     })
     .filter(Boolean)
@@ -515,12 +516,12 @@ async function fallbackHotelNearbySearch(query) {
 
   return {
     hotel: {
-      placeId: candidate.place_id,
-      name: hotelDetails.name,
-      address: hotelDetails.formatted_address,
-      phone: hotelDetails.formatted_phone_number || "",
+      placeId: candidate.id,
+      name: hotelDetails.displayName,
+      address: hotelDetails.formattedAddress,
+      phone: hotelDetails.nationalPhoneNumber || "",
       rating: hotelDetails.rating || null,
-      website: hotelDetails.website || "",
+      website: hotelDetails.websiteURI || "",
       location: { lat: hotelLoc.lat(), lng: hotelLoc.lng() }
     },
     nearbyPlaces,
@@ -580,6 +581,7 @@ hotelForm.addEventListener("submit", async (event) => {
     renderCityMapSection(data.hotel);
     renderNearbySection(data.hotel, data.nearbyPlaces || []);
     renderPoliceSection(data.hotel, data.policeStations || []);
+    renderAIInfo(data.aiInfo);
 
     resultCard.hidden = false;
     statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
@@ -593,6 +595,17 @@ hotelForm.addEventListener("submit", async (event) => {
       searchBtn.textContent = "Find hotel";
     }
   }
+});
+
+tabButtons.forEach(btn => {
+  btn.addEventListener("click", () => {
+    tabButtons.forEach(b => b.classList.remove("active"));
+    tabContents.forEach(c => c.classList.remove("active"));
+
+    btn.classList.add("active");
+    const targetId = btn.getAttribute("data-target");
+    document.getElementById(targetId).classList.add("active");
+  });
 });
 
 triggerWorkflowBtn.addEventListener("click", async () => {
