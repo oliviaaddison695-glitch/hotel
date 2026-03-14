@@ -15,6 +15,19 @@ function readBrowserKeyOverride() {
   return fromWindow || fromQuery || fromStorage || null;
 }
 
+function readGeminiKeyOverride() {
+  const fromWindow = window.GEMINI_API_KEY;
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("geminiKey");
+
+  if (fromQuery && window.localStorage) {
+    window.localStorage.setItem("GEMINI_API_KEY", fromQuery);
+  }
+
+  const fromStorage = window.localStorage?.getItem("GEMINI_API_KEY");
+  return fromWindow || fromQuery || fromStorage || null;
+}
+
 const hotelForm = document.getElementById("hotelForm");
 const hotelNameInput = document.getElementById("hotelName");
 const searchBtn = hotelForm?.querySelector("button[type=\"submit\"]");
@@ -160,7 +173,45 @@ function buildSearchLinks(hotelName, address) {
 function renderAIInfo(aiInfo) {
   const aiContainer = document.getElementById("aiInfoContent");
   if (aiContainer) {
-    aiContainer.textContent = aiInfo || "No AI information available.";
+    aiContainer.innerHTML = aiInfo || "No AI information available.";
+  }
+}
+
+async function fetchGeminiInfoClient(hotelName, address) {
+  const geminiKey = readGeminiKeyOverride();
+  if (!geminiKey) return "AI information not available. Please provide a Gemini API key via the <code>?geminiKey=</code> URL parameter to enable AI generation in client-side mode.";
+
+  try {
+    const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+      return "Could not fetch AI information at this time.";
+    }
+
+    let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    // Clean up potential markdown formatting that Gemini sometimes insists on adding
+    htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
+    return htmlContent;
+  } catch (err) {
+    console.error("Gemini fetch error:", err);
+    return "Failed to connect to AI service.";
   }
 }
 
@@ -572,6 +623,8 @@ hotelForm.addEventListener("submit", async (event) => {
       if (shouldFallback) {
         statusEl.textContent = "Using direct Google Maps mode...";
         data = await fallbackHotelNearbySearch(query);
+        statusEl.textContent = "Generating AI insights...";
+        data.aiInfo = await fetchGeminiInfoClient(data.hotel.name, data.hotel.address);
       } else {
         throw error;
       }

@@ -138,10 +138,17 @@ function formatGoogleError(error) {
 }
 
 async function fetchGeminiInfo(hotelName, address) {
-  if (!GEMINI_API_KEY) return "AI information not available (Missing API Key).";
+  if (!GEMINI_API_KEY) return "AI information not available. Please configure the GEMINI_API_KEY server environment variable.";
 
   try {
-    const prompt = `Provide a brief overview of the city where ${hotelName} (${address}) is located, and a short, generic description of what a guest might expect at this hotel. Format as plain text or simple markdown.`;
+    const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
@@ -161,7 +168,10 @@ async function fetchGeminiInfo(hotelName, address) {
       return "Could not fetch AI information at this time.";
     }
 
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    // Clean up potential markdown formatting that Gemini sometimes insists on adding
+    htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
+    return htmlContent;
   } catch (err) {
     console.error("Gemini fetch error:", err);
     return "Failed to connect to AI service.";
