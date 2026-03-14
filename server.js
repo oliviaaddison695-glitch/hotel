@@ -162,10 +162,17 @@ Include the following sections:
       })
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      return "Could not fetch AI information. Invalid response from AI service.";
+    }
+
     if (!response.ok) {
       console.error("Gemini API error:", data);
-      return "Could not fetch AI information at this time.";
+      const errMsg = data?.error?.message || "Unknown error";
+      return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: ${errMsg}</p>`;
     }
 
     let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
