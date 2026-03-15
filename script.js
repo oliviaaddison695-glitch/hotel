@@ -459,6 +459,32 @@ async function fetchClientGeminiInfo(hotelName, address) {
   if (!apiKey) return null;
 
   try {
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    const listData = await listRes.json();
+
+    let validModels = [];
+    if (listData.models) {
+      validModels = listData.models.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")).map(m => m.name);
+    }
+
+    const preferredModels = ['models/gemini-1.5-flash', 'models/gemini-pro', 'models/gemini-1.0-pro'];
+    let selectedModel = null;
+
+    for (const pModel of preferredModels) {
+      if (validModels.includes(pModel)) {
+        selectedModel = pModel;
+        break;
+      }
+    }
+
+    if (!selectedModel && validModels.length > 0) {
+        selectedModel = validModels[0];
+    }
+
+    if (!selectedModel) {
+        return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: No valid text generation models found for this API key.</p>`;
+    }
+
     const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
 
 Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
@@ -468,7 +494,8 @@ Include the following sections:
 2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
 3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    let modelName = selectedModel.replace(/^models\//, '');
+    let response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -476,7 +503,34 @@ Include the following sections:
       })
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      return "Could not fetch AI information. Invalid response from AI service.";
+    }
+
+    if (!response.ok && (data?.error?.message?.includes("is not found") || response.status === 404)) {
+        console.warn(`Model ${modelName} failed on client. Falling back to gemini-1.0-pro.`);
+        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: prompt }]
+            }]
+          })
+        });
+
+        try {
+          data = await response.json();
+        } catch (e) {
+          return "Could not fetch AI information. Invalid response from AI service.";
+        }
+    }
+
     if (!response.ok) {
         console.error("Client Gemini API error:", data);
         const errMsg = data?.error?.message || "Unknown error";
