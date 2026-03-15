@@ -15,6 +15,17 @@ function readBrowserKeyOverride() {
   return fromWindow || fromQuery || fromStorage || null;
 }
 
+function readGeminiKeyOverride() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("geminiKey") || params.get("Gemini_API_key") || params.get("gemini_key");
+
+  if (fromQuery && window.localStorage) {
+    window.localStorage.setItem("HOTEL_GEMINI_API_KEY", fromQuery);
+  }
+
+  return fromQuery || window.localStorage?.getItem("HOTEL_GEMINI_API_KEY") || null;
+}
+
 const hotelForm = document.getElementById("hotelForm");
 const hotelNameInput = document.getElementById("hotelName");
 const searchBtn = hotelForm?.querySelector("button[type=\"submit\"]");
@@ -443,6 +454,45 @@ function dedupePlacesById(places) {
   return Array.from(new Map(places.map((p) => [p.place_id, p])).values());
 }
 
+async function fetchClientGeminiInfo(hotelName, address) {
+  const apiKey = readGeminiKeyOverride();
+  if (!apiKey) return null;
+
+  try {
+    const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+        console.error("Client Gemini API error:", data);
+        const errMsg = data?.error?.message || "Unknown error";
+        return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: ${errMsg}</p>`;
+    }
+
+    let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
+    return htmlContent;
+
+  } catch (err) {
+    console.error("Client Gemini fetch error:", err);
+    return "<p>Failed to connect to AI service from the browser.</p>";
+  }
+}
+
 async function fallbackHotelNearbySearch(query) {
   const candidate = await findHotelCandidate(query);
   const hotelDetails = await placeDetails(candidate.place_id);
@@ -503,6 +553,8 @@ async function fallbackHotelNearbySearch(query) {
     drivingDurationText: matrix[i]?.duration?.text || null
   }));
 
+  const aiInfo = await fetchClientGeminiInfo(hotelDetails.name, hotelDetails.formatted_address);
+
   return {
     hotel: {
       placeId: candidate.place_id,
@@ -514,7 +566,8 @@ async function fallbackHotelNearbySearch(query) {
       location: { lat: hotelLoc.lat(), lng: hotelLoc.lng() }
     },
     nearbyPlaces,
-    policeStations
+    policeStations,
+    aiInfo
   };
 }
 
@@ -571,7 +624,7 @@ hotelForm.addEventListener("submit", async (event) => {
         aiContent.innerHTML = data.aiInfo;
         aiTabBtn.style.display = "inline-block";
       } else {
-        aiContent.innerHTML = "<p>AI information is only available when running the backend server with a configured Gemini API key.</p>";
+        aiContent.innerHTML = "<p>AI information is only available when running the backend server with a configured Gemini API key. Alternatively, you can use the frontend-only mode by passing your key in the URL like <code>?Gemini_API_key=YOUR_KEY</code></p>";
         aiTabBtn.style.display = "inline-block";
       }
     }
