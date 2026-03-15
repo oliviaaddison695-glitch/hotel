@@ -552,18 +552,9 @@ hotelForm.addEventListener("submit", async (event) => {
         body: JSON.stringify({ query })
       });
     } catch (error) {
-      const shouldFallback =
-        error.message.includes("cannot reach server") ||
-        error.message.includes("Fetch failed") ||
-        error.message.includes("Request failed (404)") ||
-        error.message.includes("Request failed (405)");
-
-      if (shouldFallback) {
-        statusEl.textContent = "Using direct Google Maps mode...";
-        data = await fallbackHotelNearbySearch(query);
-      } else {
-        throw error;
-      }
+      console.warn("Backend search failed, falling back to browser API.", error);
+      statusEl.textContent = "Using direct Google Maps mode...";
+      data = await fallbackHotelNearbySearch(query);
     }
 
     renderHotelInfo(data.hotel);
@@ -580,8 +571,8 @@ hotelForm.addEventListener("submit", async (event) => {
         aiContent.innerHTML = data.aiInfo;
         aiTabBtn.style.display = "inline-block";
       } else {
-        aiContent.innerHTML = "";
-        aiTabBtn.style.display = "none";
+        aiContent.innerHTML = "<p>AI information is only available when running the backend server with a configured Gemini API key.</p>";
+        aiTabBtn.style.display = "inline-block";
       }
     }
 
