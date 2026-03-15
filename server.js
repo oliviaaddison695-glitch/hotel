@@ -6,8 +6,9 @@ const { URL } = require("url");
 const PORT = Number(process.env.PORT || 4173);
 const GOOGLE_MAPS_SERVER_API_KEY = process.env.GOOGLE_MAPS_SERVER_API_KEY;
 const GOOGLE_MAPS_BROWSER_API_KEY = process.env.GOOGLE_MAPS_BROWSER_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 350);
+const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 1500);
 const STORE_MAP_MAX_RESULTS = Number(process.env.STORE_MAP_MAX_RESULTS || 120);
 const POLICE_MAX_RESULTS = Number(process.env.POLICE_MAX_RESULTS || 3);
 
@@ -136,6 +137,104 @@ function formatGoogleError(error) {
   return msg;
 }
 
+async function fetchGeminiInfo(hotelName, address) {
+  if (!GEMINI_API_KEY) return "AI information not available. Please configure the GEMINI_API_KEY server environment variable.";
+
+  try {
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+    const listData = await listRes.json();
+
+    let validModels = [];
+    if (listData.models) {
+      validModels = listData.models.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")).map(m => m.name);
+    }
+
+    const preferredModels = ['models/gemini-1.5-flash', 'models/gemini-pro', 'models/gemini-1.0-pro'];
+    let selectedModel = null;
+
+    for (const pModel of preferredModels) {
+      if (validModels.includes(pModel)) {
+        selectedModel = pModel;
+        break;
+      }
+    }
+
+    if (!selectedModel && validModels.length > 0) {
+        selectedModel = validModels[0];
+    }
+
+    if (!selectedModel) {
+        return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: No valid text generation models found.</p>`;
+    }
+
+    const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+    // Try selected model
+    let modelName = selectedModel.replace(/^models\//, '');
+    let response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }]
+      })
+    });
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      return "Could not fetch AI information. Invalid response from AI service.";
+    }
+
+    // Attempt fallback to a very basic model if the first attempt gets a 404 or specific error despite listModels passing it
+    if (!response.ok && (data?.error?.message?.includes("is not found") || response.status === 404)) {
+        console.warn(`Model ${modelName} failed. Falling back to gemini-1.0-pro.`);
+        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: prompt }]
+            }]
+          })
+        });
+
+        try {
+          data = await response.json();
+        } catch (e) {
+          return "Could not fetch AI information. Invalid response from AI service.";
+        }
+    }
+
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+      const errMsg = data?.error?.message || "Unknown error";
+      return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: ${errMsg}</p>`;
+    }
+
+    let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    // Clean up potential markdown formatting that Gemini sometimes insists on adding
+    htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
+    return htmlContent;
+  } catch (err) {
+    console.error("Gemini fetch error:", err);
+    return "Failed to connect to AI service.";
+  }
+}
+
 async function handleHotelNearby(req, res) {
   try {
     if (!GOOGLE_MAPS_SERVER_API_KEY) {
@@ -216,6 +315,8 @@ async function handleHotelNearby(req, res) {
       drivingDurationText: matrix[i]?.duration?.text || null
     }));
 
+    const aiInfo = await fetchGeminiInfo(hotel.name, hotel.formatted_address);
+
     sendJson(res, 200, {
       hotel: {
         placeId: hotelCandidate.place_id,
@@ -238,7 +339,8 @@ async function handleHotelNearby(req, res) {
         }
       },
       nearbyPlaces: streetPlaces,
-      policeStations: policeWithDriving
+      policeStations: policeWithDriving,
+      aiInfo: aiInfo
     });
   } catch (error) {
     sendJson(res, 500, { error: formatGoogleError(error), raw: error.message || String(error) });

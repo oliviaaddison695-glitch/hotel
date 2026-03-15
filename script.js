@@ -38,10 +38,12 @@ const triggerWorkflowBtn = document.getElementById("triggerWorkflowBtn");
 const driveFolderBtn = document.getElementById("driveFolderBtn");
 const workflowStatus = document.getElementById("workflowStatus");
 
+let cityMap;
 let nearbyMap;
 let policeMap;
 let nearbyInfoWindow;
 let policeInfoWindow;
+let cityMarker;
 let nearbyMarkers = [];
 let policeMarkers = [];
 let googleMapsKey;
@@ -193,12 +195,40 @@ function renderHotelInfo(hotel) {
 
   websiteLink.href = hotel.website || `https://www.google.com/search?q=${encodeURIComponent(hotel.name || "hotel")}`;
   buildSearchLinks(hotel.name || "hotel", hotel.address || "");
+
+  // Render City Map
+  cityMap = cityMap || new google.maps.Map(document.getElementById("cityMap"), {
+    center: hotel.location,
+    zoom: 13,
+    mapId: "DEMO_MAP_ID",
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: true
+  });
+  cityMap.setCenter(hotel.location);
+
+  if (cityMarker) {
+    cityMarker.map = null;
+  }
+
+  const markerContent = document.createElement("div");
+  markerContent.className = "marker-label marker-hotel";
+  markerContent.textContent = "Hotel";
+
+  cityMarker = new google.maps.marker.AdvancedMarkerElement({
+    map: cityMap,
+    position: hotel.location,
+    content: markerContent,
+    title: hotel.name,
+    zIndex: 2000
+  });
 }
 
 function renderNearbySection(hotel, places) {
   nearbyMap = nearbyMap || new google.maps.Map(document.getElementById("nearbyMap"), {
     center: hotel.location,
     zoom: 17,
+    mapId: "DEMO_MAP_ID",
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: true
@@ -242,7 +272,7 @@ function renderNearbySection(hotel, places) {
   if (places.length) {
     nearbyMap.fitBounds(bounds, 45);
     const z = nearbyMap.getZoom();
-    if (z > 18) nearbyMap.setZoom(18);
+    if (z > 16) nearbyMap.setZoom(16); // Zoom out a bit more to see the broader density
   }
 
   resultsHeading.textContent = `Places (${places.length})`;
@@ -275,6 +305,7 @@ function renderPoliceSection(hotel, stations) {
   policeMap = policeMap || new google.maps.Map(document.getElementById("policeMap"), {
     center: hotel.location,
     zoom: 14,
+    mapId: "DEMO_MAP_ID",
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: true
@@ -542,6 +573,18 @@ hotelForm.addEventListener("submit", async (event) => {
     resultCard.hidden = false;
     statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    const aiTabBtn = document.querySelector(".tab-button[data-target=\"tab-ai\"]");
+    const aiContent = document.getElementById("aiInfoContent");
+    if (aiTabBtn && aiContent) {
+      if (data.aiInfo) {
+        aiContent.innerHTML = data.aiInfo;
+        aiTabBtn.style.display = "inline-block";
+      } else {
+        aiContent.innerHTML = "";
+        aiTabBtn.style.display = "none";
+      }
+    }
+
   } catch (error) {
     statusEl.textContent = error.message;
   } finally {
@@ -551,6 +594,18 @@ hotelForm.addEventListener("submit", async (event) => {
       searchBtn.textContent = "Find hotel";
     }
   }
+});
+
+document.querySelectorAll(".tab-button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-button").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+    btn.classList.add("active");
+    const targetId = btn.getAttribute("data-target");
+    if (targetId) {
+      document.getElementById(targetId)?.classList.add("active");
+    }
+  });
 });
 
 triggerWorkflowBtn.addEventListener("click", async () => {

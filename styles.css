@@ -59,6 +59,43 @@ button, a {
 
 .legend { margin: 0.25rem 0 0.75rem; font-size: .9rem; }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+.tab-button {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 0;
+}
+.tab-button.active {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+.tab-content {
+  display: none;
+}
+.tab-content.active {
+  display: block;
+}
+.ai-content {
+  background: #f8fbff;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .nearby-layout { display: grid; grid-template-columns: 2fr 1fr; gap: .8rem; margin-bottom: 1rem; }
 .map {
   height: 520px;
