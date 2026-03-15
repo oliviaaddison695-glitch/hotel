@@ -38,15 +38,19 @@ with sync_playwright() as p:
     # Let it settle and render
     page.wait_for_timeout(2000)
 
-    # Check if we have the AI tab
+    # Check if we have the AI tabs
     try:
-        print("Clicking AI review tab...")
-        page.click(".tab-button[data-target='tab-ai']", timeout=5000)
-        # Wait for AI content to populate
-        page.wait_for_selector("#aiInfoContent h2", timeout=5000)
-        time.sleep(2) # let images load
+        print("Clicking City AI review tab...")
+        page.click(".tab-button[data-target='tab-city-ai']", timeout=5000)
+        page.wait_for_selector("#aiCityContent h2", timeout=5000)
+        time.sleep(1) # let images load
+
+        print("Clicking Hotel AI review tab...")
+        page.click(".tab-button[data-target='tab-hotel-ai']", timeout=5000)
+        page.wait_for_selector("#aiHotelContent h2", timeout=5000)
+        time.sleep(1) # let images load
     except Exception as e:
-        print(f"Could not click AI tab or load content: {e}")
+        print(f"Could not click AI tabs or load content: {e}")
 
     os.makedirs("/home/jules/verification", exist_ok=True)
     screenshot_path = "/home/jules/verification/verification_ai_photos.png"

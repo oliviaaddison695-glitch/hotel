@@ -348,8 +348,14 @@ function renderNearbySection(hotel, places) {
 
   if (places.length) {
     nearbyMap.fitBounds(bounds, 45);
-    const z = nearbyMap.getZoom();
-    if (z > 16) nearbyMap.setZoom(16); // Zoom out a bit more to see the broader density
+    // Google Maps fitBounds executes asynchronously in some cases, so wait for bounds_changed
+    // or just listen once to enforce a maximum zoom (which prevents zooming IN too far)
+    google.maps.event.addListenerOnce(nearbyMap, 'bounds_changed', function() {
+      const z = nearbyMap.getZoom();
+      if (z > 16) nearbyMap.setZoom(16);
+    });
+  } else {
+    nearbyMap.setZoom(16);
   }
 
   resultsHeading.textContent = `Places (${places.length})`;
@@ -413,7 +419,15 @@ function renderPoliceSection(hotel, stations) {
     markerById.set(station.placeId, marker);
   });
 
-  if (stations.length) policeMap.fitBounds(bounds, 80);
+  if (stations.length) {
+    policeMap.fitBounds(bounds, 80);
+    google.maps.event.addListenerOnce(policeMap, 'bounds_changed', function() {
+      const z = policeMap.getZoom();
+      if (z > 16) policeMap.setZoom(16);
+    });
+  } else {
+    policeMap.setZoom(14);
+  }
 
   policeHeading.textContent = `Police stations (${stations.length})`;
   policeList.innerHTML = "";
@@ -766,18 +780,36 @@ hotelForm.addEventListener("submit", async (event) => {
       data = await fallbackHotelNearbySearch(query);
     }
 
+    resultCard.hidden = false;
+    // Force a layout reflow so Google Maps calculates dimensions correctly for fitBounds
+    void resultCard.offsetHeight;
+
     renderHotelInfo(data.hotel);
     renderNearbySection(data.hotel, data.nearbyPlaces || []);
     renderPoliceSection(data.hotel, data.policeStations || []);
 
-    resultCard.hidden = false;
     statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
-    const aiTabBtn = document.querySelector(".tab-button[data-target=\"tab-ai\"]");
-    const aiContent = document.getElementById("aiInfoContent");
-    if (aiTabBtn && aiContent) {
+    const aiCityTabBtn = document.querySelector(".tab-button[data-target=\"tab-city-ai\"]");
+    const aiHotelTabBtn = document.querySelector(".tab-button[data-target=\"tab-hotel-ai\"]");
+    const aiCityContent = document.getElementById("aiCityContent");
+    const aiHotelContent = document.getElementById("aiHotelContent");
+
+    if (aiCityTabBtn && aiHotelTabBtn && aiCityContent && aiHotelContent) {
       if (data.aiInfo) {
-        let processedHtml = data.aiInfo;
+        let aiHtml = data.aiInfo;
+        let cityHtml = "";
+        let hotelHtml = "";
+
+        // Split AI response based on headers
+        const hotelIndex = aiHtml.indexOf("<h2>Hotel</h2>");
+        if (hotelIndex !== -1) {
+          cityHtml = aiHtml.substring(0, hotelIndex);
+          hotelHtml = aiHtml.substring(hotelIndex);
+        } else {
+          cityHtml = aiHtml;
+          hotelHtml = "<p>No specific hotel information returned.</p>";
+        }
 
         let apiKey = googleMapsKey || FALLBACK_BROWSER_MAPS_KEY;
         let cUrl = data.hotel.cityPhotoUrl;
@@ -791,17 +823,23 @@ hotelForm.addEventListener("submit", async (event) => {
         }
 
         if (cUrl) {
-          processedHtml = processedHtml.replace(/(<h2>City<\/h2>)/i, `$1\n<img class="ai-section-img" src="${cUrl}" alt="City Photo" />`);
-        }
-        if (hUrl) {
-          processedHtml = processedHtml.replace(/(<h2>Hotel<\/h2>)/i, `$1\n<img class="ai-section-img" src="${hUrl}" alt="Hotel Photo" />`);
+           cityHtml = cityHtml.replace("<h2>City</h2>", `<h2>City</h2>\n<img class="ai-section-img" src="${cUrl}" alt="City photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
         }
 
-        aiContent.innerHTML = processedHtml;
-        aiTabBtn.style.display = "inline-block";
+        if (hUrl) {
+           hotelHtml = hotelHtml.replace("<h2>Hotel</h2>", `<h2>Hotel</h2>\n<img class="ai-section-img" src="${hUrl}" alt="Hotel photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
+        }
+
+        aiCityContent.innerHTML = cityHtml;
+        aiHotelContent.innerHTML = hotelHtml;
+        aiCityTabBtn.style.display = "inline-block";
+        aiHotelTabBtn.style.display = "inline-block";
       } else {
-        aiContent.innerHTML = "<p>AI information is only available when running the backend server with a configured Gemini API key. Alternatively, you can use the frontend-only mode by passing your key in the URL like <code>?Gemini_API_key=YOUR_KEY</code></p>";
-        aiTabBtn.style.display = "inline-block";
+        const fallbackMsg = "<p>AI information is only available when running the backend server with a configured Gemini API key. Alternatively, you can use the frontend-only mode by passing your key in the URL like <code>?Gemini_API_key=YOUR_KEY</code></p>";
+        aiCityContent.innerHTML = fallbackMsg;
+        aiHotelContent.innerHTML = fallbackMsg;
+        aiCityTabBtn.style.display = "inline-block";
+        aiHotelTabBtn.style.display = "inline-block";
       }
     }
 

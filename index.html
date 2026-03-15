@@ -67,7 +67,8 @@
     <section class="card" id="resultCard" hidden>
       <div class="tabs">
         <button class="tab-button active" data-target="tab-maps">Maps & Nearby</button>
-        <button class="tab-button" data-target="tab-ai">City & Hotel Info (AI)</button>
+        <button class="tab-button" data-target="tab-city-ai">City Info (AI)</button>
+        <button class="tab-button" data-target="tab-hotel-ai">Hotel Info (AI)</button>
       </div>
 
       <div id="tab-maps" class="tab-content active">
@@ -125,10 +126,17 @@
         <p id="workflowStatus" aria-live="polite"></p>
       </div>
 
-      <div id="tab-ai" class="tab-content">
-        <h3>AI Insights</h3>
-        <div id="aiInfoContent" class="ai-content">
-          Loading AI information...
+      <div id="tab-city-ai" class="tab-content">
+        <h3>City Insights</h3>
+        <div id="aiCityContent" class="ai-content">
+          Loading City information...
+        </div>
+      </div>
+
+      <div id="tab-hotel-ai" class="tab-content">
+        <h3>Hotel Insights</h3>
+        <div id="aiHotelContent" class="ai-content">
+          Loading Hotel information...
         </div>
       </div>
     </section>
