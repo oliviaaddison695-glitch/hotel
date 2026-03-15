@@ -67,6 +67,9 @@ function haversineMeters(a, b) {
 function mapCategoryLabel(types = []) {
   if (types.some((t) => t.includes("restaurant") || t.includes("meal") || t.includes("food") || t.includes("cafe"))) return "Restaurant";
   if (types.includes("clothing_store")) return "Clothing store";
+  if (types.includes("bar")) return "Bar";
+  if (types.includes("park")) return "Park";
+  if (types.includes("parking")) return "Parking";
   if (types.includes("store") || types.includes("shopping_mall") || types.includes("department_store") || types.includes("supermarket")) return "Store";
   return null;
 }
@@ -97,9 +100,30 @@ async function resolveHotel(query) {
 }
 
 async function getHotelDetails(placeId) {
-  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=name,formatted_address,formatted_phone_number,rating,website,geometry&key=${GOOGLE_MAPS_SERVER_API_KEY}`;
+  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=name,formatted_address,formatted_phone_number,rating,website,geometry,photos&key=${GOOGLE_MAPS_SERVER_API_KEY}`;
   const data = await fetchJson(url);
   return data.result;
+}
+
+async function searchCityPhoto(address) {
+  const match = address.match(/([^,]+),\s*([^,]+)$/);
+  let cityQuery = address;
+  if (match) {
+    cityQuery = `City of ${match[1]}`;
+  } else {
+    cityQuery = `City of ${address}`;
+  }
+
+  const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(cityQuery)}&key=${GOOGLE_MAPS_SERVER_API_KEY}`;
+  try {
+    const data = await fetchJson(url);
+    if (data.results && data.results.length > 0 && data.results[0].photos && data.results[0].photos.length > 0) {
+      return data.results[0].photos[0].photo_reference;
+    }
+  } catch (e) {
+    console.error("City photo search failed:", e);
+  }
+  return null;
 }
 
 async function nearbySearchByType(location, type) {
@@ -169,11 +193,14 @@ async function fetchGeminiInfo(hotelName, address, customPromptTemplate) {
 
     let prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
 
-Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+Please format your response in clean HTML (using <h2>, <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
 
 Include the following sections:
+<h2>City</h2>
 1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
 2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+
+<h2>Hotel</h2>
 3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
 
     if (customPromptTemplate) {
@@ -271,13 +298,16 @@ async function handleHotelNearby(req, res) {
 
     const hotelLocation = { lat: hotel.geometry.location.lat, lng: hotel.geometry.location.lng };
 
-    const [restaurantRaw, storeRaw, policeRaw] = await Promise.all([
+    const [restaurantRaw, storeRaw, policeRaw, barRaw, parkRaw, parkingRaw] = await Promise.all([
       nearbySearchByType(hotelLocation, "restaurant"),
       nearbySearchByType(hotelLocation, "store"),
-      nearbySearchByType(hotelLocation, "police")
+      nearbySearchByType(hotelLocation, "police"),
+      nearbySearchByType(hotelLocation, "bar"),
+      nearbySearchByType(hotelLocation, "park"),
+      nearbySearchByType(hotelLocation, "parking")
     ]);
 
-    const streetPlaces = dedupeByPlaceId([...restaurantRaw, ...storeRaw])
+    const streetPlaces = dedupeByPlaceId([...restaurantRaw, ...storeRaw, ...barRaw, ...parkRaw, ...parkingRaw])
       .map((p) => {
         if (!p.geometry?.location) return null;
         const categoryLabel = mapCategoryLabel(p.types || []);
@@ -328,6 +358,13 @@ async function handleHotelNearby(req, res) {
 
     const aiInfo = await fetchGeminiInfo(hotel.name, hotel.formatted_address, customPrompt);
 
+    let hotelPhotoRef = null;
+    if (hotel.photos && hotel.photos.length > 0) {
+      hotelPhotoRef = hotel.photos[0].photo_reference;
+    }
+
+    const cityPhotoRef = await searchCityPhoto(hotel.formatted_address);
+
     sendJson(res, 200, {
       hotel: {
         placeId: hotelCandidate.place_id,
@@ -336,7 +373,9 @@ async function handleHotelNearby(req, res) {
         phone: hotel.formatted_phone_number || "",
         rating: hotel.rating || null,
         website: hotel.website || "",
-        location: hotelLocation
+        location: hotelLocation,
+        photoRef: hotelPhotoRef,
+        cityPhotoRef: cityPhotoRef
       },
       mapModes: {
         storesRestaurants: {
