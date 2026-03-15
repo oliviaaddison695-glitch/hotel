@@ -15,6 +15,39 @@
 </head>
 <body>
   <main class="container">
+    <div style="text-align: right; padding-top: 1rem;">
+      <button id="adminToggleBtn" style="background: var(--muted); padding: 0.5rem 1rem; font-size: 0.9rem;">Admin Settings</button>
+    </div>
+
+    <section class="card" id="adminPanel" hidden style="background: #f1f5f9; border-color: #cbd5e1; margin-bottom: 2rem;">
+      <h2>Admin Settings</h2>
+      <p>These settings are saved to your browser and override the defaults.</p>
+
+      <div style="display: grid; gap: 1rem; margin-top: 1rem;">
+        <div>
+          <label for="adminGeminiPrompt" style="font-weight: 600; color: var(--text);">Custom AI Prompt Template</label>
+          <textarea id="adminGeminiPrompt" rows="8" style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid #bcccdc; font-family: inherit; margin-top: 0.5rem;"></textarea>
+          <small style="color: var(--muted); display: block; margin-top: 0.25rem;">Use <code>{{HOTEL_NAME}}</code> and <code>{{ADDRESS}}</code> as placeholders.</small>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div>
+            <label for="adminStoreRadius" style="font-weight: 600; color: var(--text);">Store/Restaurant Radius (meters)</label>
+            <input id="adminStoreRadius" type="number" value="1500" style="width: 100%; margin-top: 0.5rem;">
+          </div>
+          <div>
+            <label for="adminPoliceLimit" style="font-weight: 600; color: var(--text);">Max Police Stations</label>
+            <input id="adminPoliceLimit" type="number" value="3" style="width: 100%; margin-top: 0.5rem;">
+          </div>
+        </div>
+
+        <div style="text-align: right;">
+          <button id="saveAdminBtn">Save Settings</button>
+          <span id="adminStatus" style="margin-left: 1rem; color: #059669; font-weight: 600;"></span>
+        </div>
+      </div>
+    </section>
+
     <section class="hero" id="heroSection">
       <div class="hero-card">
         <h1>Hotel Info Explorer</h1>
@@ -53,29 +86,36 @@
           </div>
         </div>
 
-        <h3>0) City Map</h3>
+        <h3>City Map</h3>
         <p class="legend">Hotel location overview.</p>
         <div class="map-container">
           <div id="cityMap" class="map"></div>
         </div>
 
-        <h3>1) Stores & Restaurants (street-level auto area)</h3>
-        <p class="legend">Pins use generic labels: Restaurant / Clothing store / Store.</p>
-        <div class="nearby-layout">
-          <div id="nearbyMap" class="map"></div>
-          <aside class="sidebar">
-            <h4 id="resultsHeading">Places</h4>
-            <ul id="placesList"></ul>
-          </aside>
-        </div>
+        <div class="maps-grid-desktop">
+          <div class="map-section">
+            <h3>Stores & Restaurants</h3>
+            <p class="legend">Pins use generic labels: Restaurant / Clothing store / Store.</p>
+            <div class="nearby-layout">
+              <div id="nearbyMap" class="map"></div>
+              <aside class="sidebar">
+                <h4 id="resultsHeading">Places</h4>
+                <ul id="placesList"></ul>
+              </aside>
+            </div>
+          </div>
 
-        <h3>2) Closest Police Stations (auto nearest)</h3>
-        <div class="nearby-layout">
-          <div id="policeMap" class="map"></div>
-          <aside class="sidebar">
-            <h4 id="policeHeading">Police stations</h4>
-            <ul id="policeList"></ul>
-          </aside>
+          <div class="map-section">
+            <h3>Closest Police Stations</h3>
+            <p class="legend">Auto nearest locations.</p>
+            <div class="nearby-layout">
+              <div id="policeMap" class="map"></div>
+              <aside class="sidebar">
+                <h4 id="policeHeading">Police stations</h4>
+                <ul id="policeList"></ul>
+              </aside>
+            </div>
+          </div>
         </div>
 
         <div class="workflow-actions">

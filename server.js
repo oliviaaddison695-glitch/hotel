@@ -137,7 +137,7 @@ function formatGoogleError(error) {
   return msg;
 }
 
-async function fetchGeminiInfo(hotelName, address) {
+async function fetchGeminiInfo(hotelName, address, customPromptTemplate) {
   if (!GEMINI_API_KEY) return "AI information not available. Please configure the GEMINI_API_KEY server environment variable.";
 
   try {
@@ -167,7 +167,7 @@ async function fetchGeminiInfo(hotelName, address) {
         return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: No valid text generation models found.</p>`;
     }
 
-    const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
+    let prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
 
 Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
 
@@ -175,6 +175,12 @@ Include the following sections:
 1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
 2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
 3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+    if (customPromptTemplate) {
+      prompt = customPromptTemplate
+      .replaceAll("{{HOTEL_NAME}}", hotelName)
+      .replaceAll("{{ADDRESS}}", address);
+    }
 
     // Try selected model
     let modelName = selectedModel.replace(/^models\//, '');
@@ -245,6 +251,11 @@ async function handleHotelNearby(req, res) {
     const body = await parseBody(req);
     const query = String(body?.query || "").trim();
 
+    // Support admin overrides from frontend payload
+    const overrideRadius = body?.adminSettings?.storeRadius ? Number(body.adminSettings.storeRadius) : STORE_MAP_MAX_DISTANCE_METERS;
+    const overridePoliceLimit = body?.adminSettings?.policeLimit ? Number(body.adminSettings.policeLimit) : POLICE_MAX_RESULTS;
+    const customPrompt = body?.adminSettings?.prompt || null;
+
     if (!query) {
       sendJson(res, 400, { error: "Please provide a hotel name or address." });
       return;
@@ -283,7 +294,7 @@ async function handleHotelNearby(req, res) {
         };
       })
       .filter(Boolean)
-      .filter((p) => p.distanceMeters <= STORE_MAP_MAX_DISTANCE_METERS)
+      .filter((p) => p.distanceMeters <= overrideRadius)
       .sort((a, b) => a.distanceMeters - b.distanceMeters)
       .slice(0, STORE_MAP_MAX_RESULTS);
 
@@ -302,7 +313,7 @@ async function handleHotelNearby(req, res) {
       })
       .filter(Boolean)
       .sort((a, b) => a.distanceMeters - b.distanceMeters)
-      .slice(0, POLICE_MAX_RESULTS);
+      .slice(0, overridePoliceLimit);
 
     const matrix = await distanceMatrixDriving(
       hotelLocation,
@@ -315,7 +326,7 @@ async function handleHotelNearby(req, res) {
       drivingDurationText: matrix[i]?.duration?.text || null
     }));
 
-    const aiInfo = await fetchGeminiInfo(hotel.name, hotel.formatted_address);
+    const aiInfo = await fetchGeminiInfo(hotel.name, hotel.formatted_address, customPrompt);
 
     sendJson(res, 200, {
       hotel: {

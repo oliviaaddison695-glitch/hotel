@@ -60,6 +60,66 @@ let policeMarkers = [];
 let googleMapsKey;
 let searchInProgress = false;
 
+const DEFAULT_PROMPT = `You are a helpful travel assistant. Provide a comprehensive overview of the city where {{HOTEL_NAME}} ({{ADDRESS}}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+// Admin UI Elements
+const adminToggleBtn = document.getElementById("adminToggleBtn");
+const adminPanel = document.getElementById("adminPanel");
+const adminGeminiPrompt = document.getElementById("adminGeminiPrompt");
+const adminStoreRadius = document.getElementById("adminStoreRadius");
+const adminPoliceLimit = document.getElementById("adminPoliceLimit");
+const saveAdminBtn = document.getElementById("saveAdminBtn");
+const adminStatus = document.getElementById("adminStatus");
+
+function loadAdminSettings() {
+  const settingsStr = window.localStorage?.getItem("HOTEL_ADMIN_SETTINGS");
+  let settings = {
+    prompt: DEFAULT_PROMPT,
+    storeRadius: 1500,
+    policeLimit: 3
+  };
+
+  if (settingsStr) {
+    try {
+      settings = { ...settings, ...JSON.parse(settingsStr) };
+    } catch(e) {}
+  }
+
+  adminGeminiPrompt.value = settings.prompt;
+  adminStoreRadius.value = settings.storeRadius;
+  adminPoliceLimit.value = settings.policeLimit;
+
+  return settings;
+}
+
+const currentAdminSettings = loadAdminSettings();
+
+adminToggleBtn?.addEventListener("click", () => {
+  adminPanel.hidden = !adminPanel.hidden;
+});
+
+saveAdminBtn?.addEventListener("click", () => {
+  const newSettings = {
+    prompt: adminGeminiPrompt.value || DEFAULT_PROMPT,
+    storeRadius: parseInt(adminStoreRadius.value) || 1500,
+    policeLimit: parseInt(adminPoliceLimit.value) || 3
+  };
+  window.localStorage?.setItem("HOTEL_ADMIN_SETTINGS", JSON.stringify(newSettings));
+
+  // Update current runtime settings
+  Object.assign(currentAdminSettings, newSettings);
+
+  adminStatus.textContent = "Saved!";
+  setTimeout(() => { adminStatus.textContent = ""; }, 2000);
+});
+
 function categoryClass(categoryLabel) {
   if (categoryLabel === "Restaurant") return "marker-restaurant";
   if (categoryLabel === "Clothing store") return "marker-clothing";
@@ -485,14 +545,9 @@ async function fetchClientGeminiInfo(hotelName, address) {
         return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: No valid text generation models found for this API key.</p>`;
     }
 
-    const prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
-
-Please format your response in clean HTML (using <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
-
-Include the following sections:
-1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
-2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
-3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+    const prompt = currentAdminSettings.prompt
+      .replaceAll("{{HOTEL_NAME}}", hotelName)
+      .replaceAll("{{ADDRESS}}", address);
 
     let modelName = selectedModel.replace(/^models\//, '');
     let response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
@@ -574,7 +629,7 @@ async function fallbackHotelNearbySearch(query) {
       };
     })
     .filter(Boolean)
-    .filter((p) => p.distanceMeters <= 350)
+    .filter((p) => p.distanceMeters <= currentAdminSettings.storeRadius)
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
     .slice(0, 120);
 
@@ -593,7 +648,7 @@ async function fallbackHotelNearbySearch(query) {
     })
     .filter(Boolean)
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 3);
+    .slice(0, currentAdminSettings.policeLimit);
 
   const matrix = await distanceMatrixDriving(hotelLoc, policeBase.map((p) => p._gLocation));
 
@@ -656,7 +711,10 @@ hotelForm.addEventListener("submit", async (event) => {
       data = await apiFetch("/api/hotel-nearby", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query })
+        body: JSON.stringify({
+          query,
+          adminSettings: currentAdminSettings
+        })
       });
     } catch (error) {
       console.warn("Backend search failed, falling back to browser API.", error);
