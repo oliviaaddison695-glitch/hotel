@@ -424,9 +424,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET") {
     const pathname = reqUrl.pathname === "/" ? "/index.html" : reqUrl.pathname;
-    const safePath = path.normalize(path.join(__dirname, pathname));
+    const docsPath = path.join(__dirname, "docs");
+    const safePath = path.normalize(path.join(docsPath, pathname));
 
-    if (!safePath.startsWith(__dirname)) {
+    if (!safePath.startsWith(docsPath)) {
       res.writeHead(403, { "Content-Type": MIME[".txt"] });
       res.end("Forbidden");
       return;
