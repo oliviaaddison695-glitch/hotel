@@ -15,7 +15,7 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && reqUrl.pathname === "/api/hotel-nearby") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
+    const mockPayload = {
       hotel: {
         placeId: "mock",
         name: "Mock Hotel",
@@ -58,7 +58,8 @@ const server = http.createServer((req, res) => {
       ],
       policeStations: [],
       aiInfo: "<h2>City</h2><p>Mock City</p><h2>Hotel</h2><p>Mock Hotel Description</p>"
-    }));
+    }
+    res.end(JSON.stringify(mockPayload));
     return;
   }
 

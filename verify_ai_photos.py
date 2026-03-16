@@ -7,7 +7,7 @@ with sync_playwright() as p:
     page = browser.new_page(viewport={"width": 1400, "height": 900})
 
     page.on("console", lambda msg: print(f"Browser console: {msg.type}: {msg.text}"))
-    page.on("pageerror", lambda err: print(f"Browser error: {err}"))
+    page.on("pageerror", lambda err: print(f"Browser error: {err}\nStack trace:\n{err.stack}"))
     page.on("requestfailed", lambda req: print(f"Request failed: {req.url} - {req.failure}"))
 
     server_url = "http://localhost:4174"
@@ -42,6 +42,7 @@ with sync_playwright() as p:
     try:
         print("Clicking City AI review tab...")
         page.click(".tab-button[data-target='tab-city-ai']", timeout=5000)
+        print("aiCityContent HTML is:", page.locator("#aiCityContent").inner_html())
         page.wait_for_selector("#aiCityContent h2", timeout=5000)
         time.sleep(1) # let images load
 

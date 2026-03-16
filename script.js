@@ -844,8 +844,11 @@ hotelForm.addEventListener("submit", async (event) => {
     // Force a layout reflow so Google Maps calculates dimensions correctly for fitBounds
     void resultCard.offsetHeight;
 
+    console.log("Rendering hotel info...");
     renderHotelInfo(data.hotel);
+    console.log("Rendering nearby section...");
     renderNearbySection(data.hotel, data.nearbyPlaces || []);
+    console.log("Rendering police section...");
     renderPoliceSection(data.hotel, data.policeStations || []);
 
     statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
@@ -862,7 +865,8 @@ hotelForm.addEventListener("submit", async (event) => {
         let hotelHtml = "";
 
         // Split AI response based on headers
-        const hotelMatch = aiHtml.match(/<h2[^>]*>\s*Hotel\s*<\/h2>/i);
+        // Use a lookahead regex to match any h2, h3, or h4 tag containing the word "Hotel"
+        const hotelMatch = aiHtml.match(/(?=<h[2-4][^>]*>(?:\s*|.*?)Hotel(?:\s*|.*?)<\/h[2-4]>)/i);
         if (hotelMatch) {
           const hotelIndex = hotelMatch.index;
           cityHtml = aiHtml.substring(0, hotelIndex);
