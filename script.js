@@ -264,6 +264,64 @@ function highlightList(listSelector, id) {
   });
 }
 
+async function renderStreetViewSection(hotel) {
+  const streetViewContainer = document.getElementById("streetViewContainer");
+  if (!streetViewContainer) return;
+
+  streetViewContainer.innerHTML = "<p>Checking Street View availability...</p>";
+
+  const apiKey = googleMapsKey || FALLBACK_BROWSER_MAPS_KEY;
+  const lat = hotel.location.lat;
+  const lng = hotel.location.lng;
+
+  try {
+    const metaUrl = `https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat},${lng}&key=${apiKey}`;
+    const metaRes = await fetch(metaUrl);
+    const metaData = await metaRes.json();
+
+    if (metaData.status === "OK" && metaData.location) {
+      // Calculate a heading to point toward the hotel's exact coordinates from the panorama's location
+      const panoLat = metaData.location.lat;
+      const panoLng = metaData.location.lng;
+      const heading = google.maps.geometry.spherical.computeHeading(
+        new google.maps.LatLng(panoLat, panoLng),
+        new google.maps.LatLng(lat, lng)
+      );
+
+      const imgUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${lat},${lng}&heading=${heading}&pitch=0&key=${apiKey}`;
+
+      streetViewContainer.innerHTML = "";
+
+      const wrapper = document.createElement("div");
+      wrapper.style.background = "#fff";
+      wrapper.style.border = "1px solid #e2e8f0";
+      wrapper.style.borderRadius = "8px";
+      wrapper.style.overflow = "hidden";
+      wrapper.style.display = "flex";
+      wrapper.style.justifyContent = "center";
+
+      const img = document.createElement("img");
+      img.src = imgUrl;
+      img.alt = `Street View for ${hotel.name || "hotel"}`;
+      img.style.maxWidth = "100%";
+      img.style.height = "auto";
+      img.style.display = "block";
+
+      wrapper.appendChild(img);
+      streetViewContainer.appendChild(wrapper);
+    } else {
+      streetViewContainer.innerHTML = `
+        <div style="width: 100%; max-width: 800px; height: 400px; background: #f1f5f9; border: 1px dashed #cbd5e1; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #64748b; font-weight: 600;">
+          No Image Available
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error("Error fetching Street View metadata:", error);
+    streetViewContainer.innerHTML = "<p>Error loading Street View.</p>";
+  }
+}
+
 function renderHotelInfo(hotel) {
   nameEl.textContent = hotel.name || "N/A";
   addressEl.textContent = hotel.address || "Address unavailable";
@@ -299,6 +357,8 @@ function renderHotelInfo(hotel) {
     title: hotel.name,
     zIndex: 2000
   });
+
+  renderStreetViewSection(hotel);
 }
 
 function renderNearbySection(hotel, places) {
@@ -802,8 +862,9 @@ hotelForm.addEventListener("submit", async (event) => {
         let hotelHtml = "";
 
         // Split AI response based on headers
-        const hotelIndex = aiHtml.indexOf("<h2>Hotel</h2>");
-        if (hotelIndex !== -1) {
+        const hotelMatch = aiHtml.match(/<h2[^>]*>\s*Hotel\s*<\/h2>/i);
+        if (hotelMatch) {
+          const hotelIndex = hotelMatch.index;
           cityHtml = aiHtml.substring(0, hotelIndex);
           hotelHtml = aiHtml.substring(hotelIndex);
         } else {
@@ -823,11 +884,11 @@ hotelForm.addEventListener("submit", async (event) => {
         }
 
         if (cUrl) {
-           cityHtml = cityHtml.replace("<h2>City</h2>", `<h2>City</h2>\n<img class="ai-section-img" src="${cUrl}" alt="City photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
+           cityHtml = cityHtml.replace(/<h2[^>]*>\s*City\s*<\/h2>/i, `<h2>City</h2>\n<img class="ai-section-img" src="${cUrl}" alt="City photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
         }
 
         if (hUrl) {
-           hotelHtml = hotelHtml.replace("<h2>Hotel</h2>", `<h2>Hotel</h2>\n<img class="ai-section-img" src="${hUrl}" alt="Hotel photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
+           hotelHtml = hotelHtml.replace(/<h2[^>]*>\s*Hotel\s*<\/h2>/i, `<h2>Hotel</h2>\n<img class="ai-section-img" src="${hUrl}" alt="Hotel photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
         }
 
         aiCityContent.innerHTML = cityHtml;
