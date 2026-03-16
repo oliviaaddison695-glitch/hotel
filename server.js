@@ -6,8 +6,9 @@ const { URL } = require("url");
 const PORT = Number(process.env.PORT || 4173);
 const GOOGLE_MAPS_SERVER_API_KEY = process.env.GOOGLE_MAPS_SERVER_API_KEY;
 const GOOGLE_MAPS_BROWSER_API_KEY = process.env.GOOGLE_MAPS_BROWSER_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 350);
+const STORE_MAP_MAX_DISTANCE_METERS = Number(process.env.STORE_MAP_MAX_DISTANCE_METERS || 1500);
 const STORE_MAP_MAX_RESULTS = Number(process.env.STORE_MAP_MAX_RESULTS || 120);
 const POLICE_MAX_RESULTS = Number(process.env.POLICE_MAX_RESULTS || 3);
 
@@ -66,6 +67,9 @@ function haversineMeters(a, b) {
 function mapCategoryLabel(types = []) {
   if (types.some((t) => t.includes("restaurant") || t.includes("meal") || t.includes("food") || t.includes("cafe"))) return "Restaurant";
   if (types.includes("clothing_store")) return "Clothing store";
+  if (types.includes("bar")) return "Bar";
+  if (types.includes("park")) return "Park";
+  if (types.includes("parking")) return "Parking";
   if (types.includes("store") || types.includes("shopping_mall") || types.includes("department_store") || types.includes("supermarket")) return "Store";
   return null;
 }
@@ -96,9 +100,30 @@ async function resolveHotel(query) {
 }
 
 async function getHotelDetails(placeId) {
-  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=name,formatted_address,formatted_phone_number,rating,website,geometry&key=${GOOGLE_MAPS_SERVER_API_KEY}`;
+  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=name,formatted_address,formatted_phone_number,rating,website,geometry,photos&key=${GOOGLE_MAPS_SERVER_API_KEY}`;
   const data = await fetchJson(url);
   return data.result;
+}
+
+async function searchCityPhoto(address) {
+  const match = address.match(/([^,]+),\s*([^,]+)$/);
+  let cityQuery = address;
+  if (match) {
+    cityQuery = `City of ${match[1]}`;
+  } else {
+    cityQuery = `City of ${address}`;
+  }
+
+  const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(cityQuery)}&key=${GOOGLE_MAPS_SERVER_API_KEY}`;
+  try {
+    const data = await fetchJson(url);
+    if (data.results && data.results.length > 0 && data.results[0].photos && data.results[0].photos.length > 0) {
+      return data.results[0].photos[0].photo_reference;
+    }
+  } catch (e) {
+    console.error("City photo search failed:", e);
+  }
+  return null;
 }
 
 async function nearbySearchByType(location, type) {
@@ -136,6 +161,113 @@ function formatGoogleError(error) {
   return msg;
 }
 
+async function fetchGeminiInfo(hotelName, address, customPromptTemplate) {
+  if (!GEMINI_API_KEY) return "AI information not available. Please configure the GEMINI_API_KEY server environment variable.";
+
+  try {
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+    const listData = await listRes.json();
+
+    let validModels = [];
+    if (listData.models) {
+      validModels = listData.models.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")).map(m => m.name);
+    }
+
+    const preferredModels = ['models/gemini-1.5-flash', 'models/gemini-pro', 'models/gemini-1.0-pro'];
+    let selectedModel = null;
+
+    for (const pModel of preferredModels) {
+      if (validModels.includes(pModel)) {
+        selectedModel = pModel;
+        break;
+      }
+    }
+
+    if (!selectedModel && validModels.length > 0) {
+        selectedModel = validModels[0];
+    }
+
+    if (!selectedModel) {
+        return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: No valid text generation models found.</p>`;
+    }
+
+    let prompt = `You are a helpful travel assistant. Provide a comprehensive overview of the city where ${hotelName} (${address}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h2>, <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+<h2>City</h2>
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+
+<h2>Hotel</h2>
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+    if (customPromptTemplate) {
+      prompt = customPromptTemplate
+      .replaceAll("{{HOTEL_NAME}}", hotelName)
+      .replaceAll("{{ADDRESS}}", address);
+    }
+
+    // Try selected model
+    let modelName = selectedModel.replace(/^models\//, '');
+    let response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }]
+      })
+    });
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      return "Could not fetch AI information. Invalid response from AI service.";
+    }
+
+    // Attempt fallback to a very basic model if the first attempt gets a 404 or specific error despite listModels passing it
+    if (!response.ok && (data?.error?.message?.includes("is not found") || response.status === 404)) {
+        console.warn(`Model ${modelName} failed. Falling back to gemini-1.0-pro.`);
+        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: prompt }]
+            }]
+          })
+        });
+
+        try {
+          data = await response.json();
+        } catch (e) {
+          return "Could not fetch AI information. Invalid response from AI service.";
+        }
+    }
+
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+      const errMsg = data?.error?.message || "Unknown error";
+      return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: ${errMsg}</p>`;
+    }
+
+    let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    // Clean up potential markdown formatting that Gemini sometimes insists on adding
+    htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
+    return htmlContent;
+  } catch (err) {
+    console.error("Gemini fetch error:", err);
+    return "Failed to connect to AI service.";
+  }
+}
+
 async function handleHotelNearby(req, res) {
   try {
     if (!GOOGLE_MAPS_SERVER_API_KEY) {
@@ -145,6 +277,11 @@ async function handleHotelNearby(req, res) {
 
     const body = await parseBody(req);
     const query = String(body?.query || "").trim();
+
+    // Support admin overrides from frontend payload
+    const overrideRadius = body?.adminSettings?.storeRadius ? Number(body.adminSettings.storeRadius) : STORE_MAP_MAX_DISTANCE_METERS;
+    const overridePoliceLimit = body?.adminSettings?.policeLimit ? Number(body.adminSettings.policeLimit) : POLICE_MAX_RESULTS;
+    const customPrompt = body?.adminSettings?.prompt || null;
 
     if (!query) {
       sendJson(res, 400, { error: "Please provide a hotel name or address." });
@@ -161,13 +298,16 @@ async function handleHotelNearby(req, res) {
 
     const hotelLocation = { lat: hotel.geometry.location.lat, lng: hotel.geometry.location.lng };
 
-    const [restaurantRaw, storeRaw, policeRaw] = await Promise.all([
+    const [restaurantRaw, storeRaw, policeRaw, barRaw, parkRaw, parkingRaw] = await Promise.all([
       nearbySearchByType(hotelLocation, "restaurant"),
       nearbySearchByType(hotelLocation, "store"),
-      nearbySearchByType(hotelLocation, "police")
+      nearbySearchByType(hotelLocation, "police"),
+      nearbySearchByType(hotelLocation, "bar"),
+      nearbySearchByType(hotelLocation, "park"),
+      nearbySearchByType(hotelLocation, "parking")
     ]);
 
-    const streetPlaces = dedupeByPlaceId([...restaurantRaw, ...storeRaw])
+    const streetPlaces = dedupeByPlaceId([...restaurantRaw, ...storeRaw, ...barRaw, ...parkRaw, ...parkingRaw])
       .map((p) => {
         if (!p.geometry?.location) return null;
         const categoryLabel = mapCategoryLabel(p.types || []);
@@ -184,7 +324,7 @@ async function handleHotelNearby(req, res) {
         };
       })
       .filter(Boolean)
-      .filter((p) => p.distanceMeters <= STORE_MAP_MAX_DISTANCE_METERS)
+      .filter((p) => p.distanceMeters <= overrideRadius)
       .sort((a, b) => a.distanceMeters - b.distanceMeters)
       .slice(0, STORE_MAP_MAX_RESULTS);
 
@@ -203,7 +343,7 @@ async function handleHotelNearby(req, res) {
       })
       .filter(Boolean)
       .sort((a, b) => a.distanceMeters - b.distanceMeters)
-      .slice(0, POLICE_MAX_RESULTS);
+      .slice(0, overridePoliceLimit);
 
     const matrix = await distanceMatrixDriving(
       hotelLocation,
@@ -216,6 +356,15 @@ async function handleHotelNearby(req, res) {
       drivingDurationText: matrix[i]?.duration?.text || null
     }));
 
+    const aiInfo = await fetchGeminiInfo(hotel.name, hotel.formatted_address, customPrompt);
+
+    let hotelPhotoRef = null;
+    if (hotel.photos && hotel.photos.length > 0) {
+      hotelPhotoRef = hotel.photos[0].photo_reference;
+    }
+
+    const cityPhotoRef = await searchCityPhoto(hotel.formatted_address);
+
     sendJson(res, 200, {
       hotel: {
         placeId: hotelCandidate.place_id,
@@ -224,7 +373,9 @@ async function handleHotelNearby(req, res) {
         phone: hotel.formatted_phone_number || "",
         rating: hotel.rating || null,
         website: hotel.website || "",
-        location: hotelLocation
+        location: hotelLocation,
+        photoRef: hotelPhotoRef,
+        cityPhotoRef: cityPhotoRef
       },
       mapModes: {
         storesRestaurants: {
@@ -238,7 +389,8 @@ async function handleHotelNearby(req, res) {
         }
       },
       nearbyPlaces: streetPlaces,
-      policeStations: policeWithDriving
+      policeStations: policeWithDriving,
+      aiInfo: aiInfo
     });
   } catch (error) {
     sendJson(res, 500, { error: formatGoogleError(error), raw: error.message || String(error) });
@@ -272,9 +424,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET") {
     const pathname = reqUrl.pathname === "/" ? "/index.html" : reqUrl.pathname;
-    const safePath = path.normalize(path.join(__dirname, pathname));
+    const docsPath = path.join(__dirname, "docs");
+    const safePath = path.normalize(path.join(docsPath, pathname));
 
-    if (!safePath.startsWith(__dirname)) {
+    if (!safePath.startsWith(docsPath)) {
       res.writeHead(403, { "Content-Type": MIME[".txt"] });
       res.end("Forbidden");
       return;

@@ -15,6 +15,17 @@ function readBrowserKeyOverride() {
   return fromWindow || fromQuery || fromStorage || null;
 }
 
+function readGeminiKeyOverride() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("geminiKey") || params.get("Gemini_API_key") || params.get("gemini_key");
+
+  if (fromQuery && window.localStorage) {
+    window.localStorage.setItem("HOTEL_GEMINI_API_KEY", fromQuery);
+  }
+
+  return fromQuery || window.localStorage?.getItem("HOTEL_GEMINI_API_KEY") || null;
+}
+
 const hotelForm = document.getElementById("hotelForm");
 const hotelNameInput = document.getElementById("hotelName");
 const searchBtn = hotelForm?.querySelector("button[type=\"submit\"]");
@@ -38,19 +49,87 @@ const triggerWorkflowBtn = document.getElementById("triggerWorkflowBtn");
 const driveFolderBtn = document.getElementById("driveFolderBtn");
 const workflowStatus = document.getElementById("workflowStatus");
 
+let cityMap;
 let nearbyMap;
 let policeMap;
 let nearbyInfoWindow;
 let policeInfoWindow;
+let cityMarker;
 let nearbyMarkers = [];
 let policeMarkers = [];
 let googleMapsKey;
 let searchInProgress = false;
 
+const DEFAULT_PROMPT = `You are a helpful travel assistant. Provide a comprehensive overview of the city where {{HOTEL_NAME}} ({{ADDRESS}}) is located, and a description of the hotel itself.
+
+Please format your response in clean HTML (using <h2>, <h4>, <p>, <ul>, <li>, and <strong> tags). Do NOT use markdown. Do NOT wrap the response in a markdown code block (\`\`\`html). Just return the raw HTML string.
+
+Include the following sections:
+<h2>City</h2>
+1. City Overview: Describe the general vibe, local culture, main travel season, and typical weather.
+2. Safety: Mention general safety considerations and include a hyperlink to the Numbeo crime index for this city (e.g., <a href="https://www.numbeo.com/crime/in/City-Name" target="_blank">Numbeo Crime Data for [City]</a>).
+
+<h2>Hotel</h2>
+3. Hotel Information: What amenities can guests expect? What is the general manager info (if publicly known, otherwise skip)? What are the typical guest demographics?`;
+
+// Admin UI Elements
+const adminToggleBtn = document.getElementById("adminToggleBtn");
+const adminPanel = document.getElementById("adminPanel");
+const adminGeminiPrompt = document.getElementById("adminGeminiPrompt");
+const adminStoreRadius = document.getElementById("adminStoreRadius");
+const adminPoliceLimit = document.getElementById("adminPoliceLimit");
+const saveAdminBtn = document.getElementById("saveAdminBtn");
+const adminStatus = document.getElementById("adminStatus");
+
+function loadAdminSettings() {
+  const settingsStr = window.localStorage?.getItem("HOTEL_ADMIN_SETTINGS");
+  let settings = {
+    prompt: DEFAULT_PROMPT,
+    storeRadius: 1500,
+    policeLimit: 3
+  };
+
+  if (settingsStr) {
+    try {
+      settings = { ...settings, ...JSON.parse(settingsStr) };
+    } catch(e) {}
+  }
+
+  adminGeminiPrompt.value = settings.prompt;
+  adminStoreRadius.value = settings.storeRadius;
+  adminPoliceLimit.value = settings.policeLimit;
+
+  return settings;
+}
+
+const currentAdminSettings = loadAdminSettings();
+
+adminToggleBtn?.addEventListener("click", () => {
+  adminPanel.hidden = !adminPanel.hidden;
+});
+
+saveAdminBtn?.addEventListener("click", () => {
+  const newSettings = {
+    prompt: adminGeminiPrompt.value || DEFAULT_PROMPT,
+    storeRadius: parseInt(adminStoreRadius.value) || 1500,
+    policeLimit: parseInt(adminPoliceLimit.value) || 3
+  };
+  window.localStorage?.setItem("HOTEL_ADMIN_SETTINGS", JSON.stringify(newSettings));
+
+  // Update current runtime settings
+  Object.assign(currentAdminSettings, newSettings);
+
+  adminStatus.textContent = "Saved!";
+  setTimeout(() => { adminStatus.textContent = ""; }, 2000);
+});
+
 function categoryClass(categoryLabel) {
   if (categoryLabel === "Restaurant") return "marker-restaurant";
   if (categoryLabel === "Clothing store") return "marker-clothing";
   if (categoryLabel === "Police") return "marker-police";
+  if (categoryLabel === "Bar") return "marker-bar";
+  if (categoryLabel === "Park") return "marker-park";
+  if (categoryLabel === "Parking") return "marker-parking";
   return "marker-store";
 }
 
@@ -185,6 +264,64 @@ function highlightList(listSelector, id) {
   });
 }
 
+async function renderStreetViewSection(hotel) {
+  const streetViewContainer = document.getElementById("streetViewContainer");
+  if (!streetViewContainer) return;
+
+  streetViewContainer.innerHTML = "<p>Checking Street View availability...</p>";
+
+  const apiKey = googleMapsKey || FALLBACK_BROWSER_MAPS_KEY;
+  const lat = hotel.location.lat;
+  const lng = hotel.location.lng;
+
+  try {
+    const metaUrl = `https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat},${lng}&key=${apiKey}`;
+    const metaRes = await fetch(metaUrl);
+    const metaData = await metaRes.json();
+
+    if (metaData.status === "OK" && metaData.location) {
+      // Calculate a heading to point toward the hotel's exact coordinates from the panorama's location
+      const panoLat = metaData.location.lat;
+      const panoLng = metaData.location.lng;
+      const heading = google.maps.geometry.spherical.computeHeading(
+        new google.maps.LatLng(panoLat, panoLng),
+        new google.maps.LatLng(lat, lng)
+      );
+
+      const imgUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x400&location=${lat},${lng}&heading=${heading}&pitch=0&key=${apiKey}`;
+
+      streetViewContainer.innerHTML = "";
+
+      const wrapper = document.createElement("div");
+      wrapper.style.background = "#fff";
+      wrapper.style.border = "1px solid #e2e8f0";
+      wrapper.style.borderRadius = "8px";
+      wrapper.style.overflow = "hidden";
+      wrapper.style.display = "flex";
+      wrapper.style.justifyContent = "center";
+
+      const img = document.createElement("img");
+      img.src = imgUrl;
+      img.alt = `Street View for ${hotel.name || "hotel"}`;
+      img.style.maxWidth = "100%";
+      img.style.height = "auto";
+      img.style.display = "block";
+
+      wrapper.appendChild(img);
+      streetViewContainer.appendChild(wrapper);
+    } else {
+      streetViewContainer.innerHTML = `
+        <div style="width: 100%; max-width: 800px; height: 400px; background: #f1f5f9; border: 1px dashed #cbd5e1; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #64748b; font-weight: 600;">
+          No Image Available
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error("Error fetching Street View metadata:", error);
+    streetViewContainer.innerHTML = "<p>Error loading Street View.</p>";
+  }
+}
+
 function renderHotelInfo(hotel) {
   nameEl.textContent = hotel.name || "N/A";
   addressEl.textContent = hotel.address || "Address unavailable";
@@ -193,12 +330,42 @@ function renderHotelInfo(hotel) {
 
   websiteLink.href = hotel.website || `https://www.google.com/search?q=${encodeURIComponent(hotel.name || "hotel")}`;
   buildSearchLinks(hotel.name || "hotel", hotel.address || "");
+
+  // Render City Map
+  cityMap = cityMap || new google.maps.Map(document.getElementById("cityMap"), {
+    center: hotel.location,
+    zoom: 13,
+    mapId: "DEMO_MAP_ID",
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: true
+  });
+  cityMap.setCenter(hotel.location);
+
+  if (cityMarker) {
+    cityMarker.map = null;
+  }
+
+  const markerContent = document.createElement("div");
+  markerContent.className = "marker-label marker-hotel";
+  markerContent.textContent = "Hotel";
+
+  cityMarker = new google.maps.marker.AdvancedMarkerElement({
+    map: cityMap,
+    position: hotel.location,
+    content: markerContent,
+    title: hotel.name,
+    zIndex: 2000
+  });
+
+  renderStreetViewSection(hotel);
 }
 
 function renderNearbySection(hotel, places) {
   nearbyMap = nearbyMap || new google.maps.Map(document.getElementById("nearbyMap"), {
     center: hotel.location,
     zoom: 17,
+    mapId: "DEMO_MAP_ID",
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: true
@@ -241,8 +408,14 @@ function renderNearbySection(hotel, places) {
 
   if (places.length) {
     nearbyMap.fitBounds(bounds, 45);
-    const z = nearbyMap.getZoom();
-    if (z > 18) nearbyMap.setZoom(18);
+    // Google Maps fitBounds executes asynchronously in some cases, so wait for bounds_changed
+    // or just listen once to enforce a maximum zoom (which prevents zooming IN too far)
+    google.maps.event.addListenerOnce(nearbyMap, 'bounds_changed', function() {
+      const z = nearbyMap.getZoom();
+      if (z > 16) nearbyMap.setZoom(16);
+    });
+  } else {
+    nearbyMap.setZoom(16);
   }
 
   resultsHeading.textContent = `Places (${places.length})`;
@@ -275,6 +448,7 @@ function renderPoliceSection(hotel, stations) {
   policeMap = policeMap || new google.maps.Map(document.getElementById("policeMap"), {
     center: hotel.location,
     zoom: 14,
+    mapId: "DEMO_MAP_ID",
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: true
@@ -305,7 +479,15 @@ function renderPoliceSection(hotel, stations) {
     markerById.set(station.placeId, marker);
   });
 
-  if (stations.length) policeMap.fitBounds(bounds, 80);
+  if (stations.length) {
+    policeMap.fitBounds(bounds, 80);
+    google.maps.event.addListenerOnce(policeMap, 'bounds_changed', function() {
+      const z = policeMap.getZoom();
+      if (z > 16) policeMap.setZoom(16);
+    });
+  } else {
+    policeMap.setZoom(14);
+  }
 
   policeHeading.textContent = `Police stations (${stations.length})`;
   policeList.innerHTML = "";
@@ -340,6 +522,9 @@ function placesService() {
 function categoryLabelFromTypes(types = []) {
   if (types.some((t) => t.includes("restaurant") || t.includes("meal") || t.includes("food") || t.includes("cafe"))) return "Restaurant";
   if (types.includes("clothing_store")) return "Clothing store";
+  if (types.includes("bar")) return "Bar";
+  if (types.includes("park")) return "Park";
+  if (types.includes("parking")) return "Parking";
   if (types.includes("store") || types.includes("shopping_mall") || types.includes("department_store") || types.includes("supermarket")) return "Store";
   return null;
 }
@@ -362,13 +547,36 @@ function findHotelCandidate(query) {
 function placeDetails(placeId) {
   return new Promise((resolve, reject) => {
     placesService().getDetails(
-      { placeId, fields: ["name", "formatted_address", "formatted_phone_number", "rating", "website", "geometry"] },
+      { placeId, fields: ["name", "formatted_address", "formatted_phone_number", "rating", "website", "geometry", "photos"] },
       (result, status) => {
         if (status !== google.maps.places.PlacesServiceStatus.OK || !result) {
           reject(new Error("Could not load hotel details."));
           return;
         }
         resolve(result);
+      }
+    );
+  });
+}
+
+function searchCityPhotoFallback(address) {
+  return new Promise((resolve) => {
+    const match = address.match(/([^,]+),\s*([^,]+)$/);
+    let cityQuery = address;
+    if (match) {
+      cityQuery = `City of ${match[1]}`;
+    } else {
+      cityQuery = `City of ${address}`;
+    }
+
+    placesService().textSearch(
+      { query: cityQuery },
+      (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0 && results[0].photos && results[0].photos.length > 0) {
+          resolve(results[0].photos[0].getUrl({ maxWidth: 800 }));
+        } else {
+          resolve(null);
+        }
       }
     );
   });
@@ -412,18 +620,109 @@ function dedupePlacesById(places) {
   return Array.from(new Map(places.map((p) => [p.place_id, p])).values());
 }
 
+async function fetchClientGeminiInfo(hotelName, address) {
+  const apiKey = readGeminiKeyOverride();
+  if (!apiKey) return null;
+
+  try {
+    const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    const listData = await listRes.json();
+
+    let validModels = [];
+    if (listData.models) {
+      validModels = listData.models.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")).map(m => m.name);
+    }
+
+    const preferredModels = ['models/gemini-1.5-flash', 'models/gemini-pro', 'models/gemini-1.0-pro'];
+    let selectedModel = null;
+
+    for (const pModel of preferredModels) {
+      if (validModels.includes(pModel)) {
+        selectedModel = pModel;
+        break;
+      }
+    }
+
+    if (!selectedModel && validModels.length > 0) {
+        selectedModel = validModels[0];
+    }
+
+    if (!selectedModel) {
+        return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: No valid text generation models found for this API key.</p>`;
+    }
+
+    const prompt = currentAdminSettings.prompt
+      .replaceAll("{{HOTEL_NAME}}", hotelName)
+      .replaceAll("{{ADDRESS}}", address);
+
+    let modelName = selectedModel.replace(/^models\//, '');
+    let response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      return "Could not fetch AI information. Invalid response from AI service.";
+    }
+
+    if (!response.ok && (data?.error?.message?.includes("is not found") || response.status === 404)) {
+        console.warn(`Model ${modelName} failed on client. Falling back to gemini-1.0-pro.`);
+        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: prompt }]
+            }]
+          })
+        });
+
+        try {
+          data = await response.json();
+        } catch (e) {
+          return "Could not fetch AI information. Invalid response from AI service.";
+        }
+    }
+
+    if (!response.ok) {
+        console.error("Client Gemini API error:", data);
+        const errMsg = data?.error?.message || "Unknown error";
+        return `<p>Could not fetch AI information.</p><p style="color:red">Gemini API Error: ${errMsg}</p>`;
+    }
+
+    let htmlContent = data.candidates?.[0]?.content?.parts?.[0]?.text || "No AI information returned.";
+    htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
+    return htmlContent;
+
+  } catch (err) {
+    console.error("Client Gemini fetch error:", err);
+    return "<p>Failed to connect to AI service from the browser.</p>";
+  }
+}
+
 async function fallbackHotelNearbySearch(query) {
   const candidate = await findHotelCandidate(query);
   const hotelDetails = await placeDetails(candidate.place_id);
   const hotelLoc = hotelDetails.geometry.location;
 
-  const [restaurantsRaw, storesRaw, policeRaw] = await Promise.all([
+  const [restaurantsRaw, storesRaw, policeRaw, barsRaw, parksRaw, parkingRaw] = await Promise.all([
     nearbyByType(hotelLoc, "restaurant"),
     nearbyByType(hotelLoc, "store"),
-    nearbyByType(hotelLoc, "police")
+    nearbyByType(hotelLoc, "police"),
+    nearbyByType(hotelLoc, "bar"),
+    nearbyByType(hotelLoc, "park"),
+    nearbyByType(hotelLoc, "parking")
   ]);
 
-  const nearbyPlaces = dedupePlacesById([...restaurantsRaw, ...storesRaw])
+  const nearbyPlaces = dedupePlacesById([...restaurantsRaw, ...storesRaw, ...barsRaw, ...parksRaw, ...parkingRaw])
     .map((p) => {
       if (!p.geometry?.location) return null;
       const categoryLabel = categoryLabelFromTypes(p.types || []);
@@ -439,7 +738,7 @@ async function fallbackHotelNearbySearch(query) {
       };
     })
     .filter(Boolean)
-    .filter((p) => p.distanceMeters <= 350)
+    .filter((p) => p.distanceMeters <= currentAdminSettings.storeRadius)
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
     .slice(0, 120);
 
@@ -458,7 +757,7 @@ async function fallbackHotelNearbySearch(query) {
     })
     .filter(Boolean)
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 3);
+    .slice(0, currentAdminSettings.policeLimit);
 
   const matrix = await distanceMatrixDriving(hotelLoc, policeBase.map((p) => p._gLocation));
 
@@ -472,6 +771,15 @@ async function fallbackHotelNearbySearch(query) {
     drivingDurationText: matrix[i]?.duration?.text || null
   }));
 
+  const aiInfo = await fetchClientGeminiInfo(hotelDetails.name, hotelDetails.formatted_address);
+
+  let hotelPhotoUrl = null;
+  if (hotelDetails.photos && hotelDetails.photos.length > 0) {
+    hotelPhotoUrl = hotelDetails.photos[0].getUrl({ maxWidth: 800 });
+  }
+
+  const cityPhotoUrl = await searchCityPhotoFallback(hotelDetails.formatted_address);
+
   return {
     hotel: {
       placeId: candidate.place_id,
@@ -480,10 +788,13 @@ async function fallbackHotelNearbySearch(query) {
       phone: hotelDetails.formatted_phone_number || "",
       rating: hotelDetails.rating || null,
       website: hotelDetails.website || "",
-      location: { lat: hotelLoc.lat(), lng: hotelLoc.lng() }
+      location: { lat: hotelLoc.lat(), lng: hotelLoc.lng() },
+      photoUrl: hotelPhotoUrl,
+      cityPhotoUrl: cityPhotoUrl
     },
     nearbyPlaces,
-    policeStations
+    policeStations,
+    aiInfo
   };
 }
 
@@ -518,30 +829,85 @@ hotelForm.addEventListener("submit", async (event) => {
       data = await apiFetch("/api/hotel-nearby", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query })
+        body: JSON.stringify({
+          query,
+          adminSettings: currentAdminSettings
+        })
       });
     } catch (error) {
-      const shouldFallback =
-        error.message.includes("cannot reach server") ||
-        error.message.includes("Fetch failed") ||
-        error.message.includes("Request failed (404)") ||
-        error.message.includes("Request failed (405)");
+      console.warn("Backend search failed, falling back to browser API.", error);
+      statusEl.textContent = "Using direct Google Maps mode...";
+      data = await fallbackHotelNearbySearch(query);
+    }
 
-      if (shouldFallback) {
-        statusEl.textContent = "Using direct Google Maps mode...";
-        data = await fallbackHotelNearbySearch(query);
+    resultCard.hidden = false;
+    // Force a layout reflow so Google Maps calculates dimensions correctly for fitBounds
+    void resultCard.offsetHeight;
+
+    console.log("Rendering hotel info...");
+    renderHotelInfo(data.hotel);
+    console.log("Rendering nearby section...");
+    renderNearbySection(data.hotel, data.nearbyPlaces || []);
+    console.log("Rendering police section...");
+    renderPoliceSection(data.hotel, data.policeStations || []);
+
+    statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
+    resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    const aiCityTabBtn = document.querySelector(".tab-button[data-target=\"tab-city-ai\"]");
+    const aiHotelTabBtn = document.querySelector(".tab-button[data-target=\"tab-hotel-ai\"]");
+    const aiCityContent = document.getElementById("aiCityContent");
+    const aiHotelContent = document.getElementById("aiHotelContent");
+
+    if (aiCityTabBtn && aiHotelTabBtn && aiCityContent && aiHotelContent) {
+      if (data.aiInfo) {
+        let aiHtml = data.aiInfo;
+        let cityHtml = "";
+        let hotelHtml = "";
+
+        // Split AI response based on headers
+        // Use a lookahead regex to match any h2, h3, or h4 tag containing the word "Hotel"
+        const hotelMatch = aiHtml.match(/(?=<h[2-4][^>]*>(?:\s*|.*?)Hotel(?:\s*|.*?)<\/h[2-4]>)/i);
+        if (hotelMatch) {
+          const hotelIndex = hotelMatch.index;
+          cityHtml = aiHtml.substring(0, hotelIndex);
+          hotelHtml = aiHtml.substring(hotelIndex);
+        } else {
+          cityHtml = aiHtml;
+          hotelHtml = "<p>No specific hotel information returned.</p>";
+        }
+
+        let apiKey = googleMapsKey || FALLBACK_BROWSER_MAPS_KEY;
+        let cUrl = data.hotel.cityPhotoUrl;
+        if (!cUrl && data.hotel.cityPhotoRef) {
+          cUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${data.hotel.cityPhotoRef}&key=${apiKey}`;
+        }
+
+        let hUrl = data.hotel.photoUrl;
+        if (!hUrl && data.hotel.photoRef) {
+          hUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${data.hotel.photoRef}&key=${apiKey}`;
+        }
+
+        if (cUrl) {
+           cityHtml = cityHtml.replace(/<h2[^>]*>\s*City\s*<\/h2>/i, `<h2>City</h2>\n<img class="ai-section-img" src="${cUrl}" alt="City photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
+        }
+
+        if (hUrl) {
+           hotelHtml = hotelHtml.replace(/<h2[^>]*>\s*Hotel\s*<\/h2>/i, `<h2>Hotel</h2>\n<img class="ai-section-img" src="${hUrl}" alt="Hotel photo" style="max-width:100%; border-radius:8px; margin-bottom:1rem;">`);
+        }
+
+        aiCityContent.innerHTML = cityHtml;
+        aiHotelContent.innerHTML = hotelHtml;
+        aiCityTabBtn.style.display = "inline-block";
+        aiHotelTabBtn.style.display = "inline-block";
       } else {
-        throw error;
+        const fallbackMsg = "<p>AI information is only available when running the backend server with a configured Gemini API key. Alternatively, you can use the frontend-only mode by passing your key in the URL like <code>?Gemini_API_key=YOUR_KEY</code></p>";
+        aiCityContent.innerHTML = fallbackMsg;
+        aiHotelContent.innerHTML = fallbackMsg;
+        aiCityTabBtn.style.display = "inline-block";
+        aiHotelTabBtn.style.display = "inline-block";
       }
     }
 
-    renderHotelInfo(data.hotel);
-    renderNearbySection(data.hotel, data.nearbyPlaces || []);
-    renderPoliceSection(data.hotel, data.policeStations || []);
-
-    resultCard.hidden = false;
-    statusEl.textContent = "Loaded hotel, nearby stores/restaurants, and closest police stations.";
-    resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     statusEl.textContent = error.message;
   } finally {
@@ -551,6 +917,18 @@ hotelForm.addEventListener("submit", async (event) => {
       searchBtn.textContent = "Find hotel";
     }
   }
+});
+
+document.querySelectorAll(".tab-button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-button").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+    btn.classList.add("active");
+    const targetId = btn.getAttribute("data-target");
+    if (targetId) {
+      document.getElementById(targetId)?.classList.add("active");
+    }
+  });
 });
 
 triggerWorkflowBtn.addEventListener("click", async () => {
